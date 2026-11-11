@@ -50,6 +50,7 @@ class PtyDriver:
                 stderr=slave,
                 env=env,
                 close_fds=True,
+                start_new_session=True,  # own process group: signals kill qemu and helpers
             )
         except OSError as e:
             os.close(master)
@@ -117,13 +118,21 @@ class PtyDriver:
             raise ConsoleError(f"console write failed: {e}") from e
 
     def close(self) -> None:
+        import signal as _signal
+
         try:
             if self.proc.poll() is None:
-                self.proc.terminate()
+                try:  # whole process group (start_new_session at spawn)
+                    os.killpg(os.getpgid(self.proc.pid), _signal.SIGTERM)
+                except OSError:
+                    self.proc.terminate()
                 try:
                     self.proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    self.proc.kill()
+                    try:
+                        os.killpg(os.getpgid(self.proc.pid), _signal.SIGKILL)
+                    except OSError:
+                        self.proc.kill()
                     self.proc.wait()
         finally:
             try:

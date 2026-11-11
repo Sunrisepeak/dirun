@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.1 — 2026-11-12
+
+Hardening (no contract surface changes).
+
+- `--file` FAT volumes: mtools when present; macOS fallback via the bundled
+  `hdiutil` (create FAT32 → attach → copy → detach); exit 126 with both
+  remedies when neither is available. Linux path unchanged.
+- Signal safety: SIGINT/SIGTERM kill the whole qemu process group
+  (`start_new_session` + `killpg`), remove the overlay/workdir, and exit
+  with 130/143.
+- Actionable errors: every 124/125/126 message is one sentence of cause plus
+  one "To fix: …" sentence; README exit-code table now lists the remedies.
+- `--help` grouped (run / console / files and environment); README quickstart.
+
 ## 0.1.0 — 2026-11-12
 
 Initial skeleton.

@@ -6,6 +6,13 @@ the guest, and return the command's stdout and exit code on the host.
 Generic by design: the contract contains no vocabulary of any particular guest
 system. Any CI can use it standalone.
 
+```sh
+# quickstart: run one command inside a bootable login-style image
+bin/disk-run --image os.qcow2 --accel tcg --timeout 300 -- echo hello
+# non-login boot flows: supply your own console script
+echo '[{"expect": "# ", "send": ""}]' > boot.json && bin/disk-run --image os.qcow2 --expect boot.json -- echo hello
+```
+
 ## Contract
 
 ```
@@ -41,12 +48,17 @@ Behaviour:
 
 ## Exit codes
 
-| Code | Meaning |
-|------|---------|
-| 0–255 | guest program's own rc, passed through verbatim |
-| 124   | overall timeout expired before the program finished |
-| 125   | console broke (EOF) or a marker was never seen |
-| 126   | runner prerequisites unusable (qemu / qemu-img / mkfs.vfat / mcopy missing, image unreadable) |
+| Code | Meaning | Message remedy |
+|------|---------|----------------|
+| 0–255 | guest program's own rc, passed through verbatim | — |
+| 124   | overall timeout expired before the program finished | increase `--timeout` to cover slow boots |
+| 125   | console broke (EOF) or a marker was never seen | check that the first expect pattern in your `--expect` script matches early boot output |
+| 126   | runner prerequisites unusable | per message: install qemu / `qemu-img info` the image / FAT tooling below |
+| 130   | interrupted (SIGINT) — qemu process group killed, temp dir cleaned | — |
+| 143   | terminated (SIGTERM) — same cleanup | — |
+
+Every framework error on stderr is one sentence of cause plus one
+"To fix: …" sentence.
 
 ## `--expect FILE.json`
 
@@ -73,6 +85,11 @@ stripped). The guest sees it on the second virtio disk, read-only. Mounting it
 in the guest is the console script's job — e.g. a step whose `send` mounts
 `/dev/vdb` before the command runs.
 
+FAT volume building uses mtools (`mkfs.vfat` + `mcopy`) when installed;
+otherwise, on macOS, the bundled `hdiutil` (create FAT32 → attach → copy →
+detach). If neither is available the run exits 126 with both remedies in the
+message (`brew install mtools` / system `hdiutil`).
+
 ## Boundary: console drivers belong to each system
 
 The core (`diskrun.protocol`, `diskrun.console`, `diskrun.runner`) is
@@ -84,7 +101,8 @@ can be ignored entirely.
 ## Requirements
 
 - Python 3.10+ (stdlib only: `pty`, `select`, `subprocess`, `tempfile`, `json`)
-- `qemu-system-<arch>`, `qemu-img`; `mkfs.vfat` + `mcopy` (only when `--file` is used)
+- `qemu-system-<arch>`, `qemu-img`; for `--file`: mtools (`mkfs.vfat`/`mcopy`)
+  or, on macOS, the system `hdiutil`
 
 ## Development
 

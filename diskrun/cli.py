@@ -6,13 +6,7 @@ import argparse
 import sys
 
 from . import __version__
-from .runner import (
-    EXIT_NO_CONSOLE,
-    EXIT_RUNNER_UNUSABLE,
-    EXIT_TIMEOUT,
-    RunnerError,
-    run,
-)
+from .runner import RunnerError, SignalExit, run
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,21 +14,25 @@ def build_parser() -> argparse.ArgumentParser:
         prog="disk-run",
         description="Boot a disk image and run a command inside it over the serial console.",
     )
-    p.add_argument("--image", required=True, help="base disk image (never written; a temp qcow2 overlay is used)")
-    p.add_argument("--machine", default=None, help="qemu machine type (default per architecture)")
-    p.add_argument("--cpu", default=None, help="qemu cpu model")
-    p.add_argument("--memory", type=int, default=512, metavar="MiB", help="guest memory in MiB (default 512)")
-    p.add_argument("--smp", type=int, default=1, help="guest vcpu count (default 1)")
-    p.add_argument("--accel", choices=["auto", "kvm", "tcg"], default="auto", help="acceleration (default auto)")
-    p.add_argument("--timeout", type=float, default=300, metavar="SEC", help="overall wall-clock budget (default 300)")
-    p.add_argument("--expect", default=None, metavar="FILE.json",
-                   help="replace the default login script with a JSON array of {expect, send, timeout}")
-    p.add_argument("--env", action="append", default=[], metavar="NAME=VAL",
-                   help="pass NAME=VAL to the guest command (repeatable, explicit allowlist only)")
-    p.add_argument("--file", action="append", default=[], metavar="host=guest",
-                   help="deliver host file into a read-only FAT second disk at guest path (repeatable)")
-    p.add_argument("command", nargs=argparse.REMAINDER, help="command to run (after --)")
+    g_run = p.add_argument_group("run")
+    g_run.add_argument("--image", required=True, metavar="IMG",
+                       help="base disk image (never written; a temp qcow2 overlay is used)")
+    g_run.add_argument("--machine", default=None, metavar="M", help="qemu machine type (default per architecture)")
+    g_run.add_argument("--cpu", default=None, metavar="C", help="qemu cpu model")
+    g_run.add_argument("--memory", type=int, default=512, metavar="MiB", help="guest memory in MiB (default 512)")
+    g_run.add_argument("--smp", type=int, default=1, metavar="N", help="guest vcpu count (default 1)")
+    g_run.add_argument("--accel", choices=["auto", "kvm", "tcg"], default="auto", help="acceleration (default auto)")
+    g_run.add_argument("--timeout", type=float, default=300, metavar="SEC", help="overall wall-clock budget (default 300)")
+    g_console = p.add_argument_group("console")
+    g_console.add_argument("--expect", default=None, metavar="FILE.json",
+                           help="replace the default login script with a JSON array of {expect, send, timeout}")
+    g_files = p.add_argument_group("files and environment")
+    g_files.add_argument("--env", action="append", default=[], metavar="NAME=VAL",
+                         help="pass NAME=VAL to the guest command (repeatable, explicit allowlist only)")
+    g_files.add_argument("--file", action="append", default=[], metavar="host=guest",
+                         help="deliver host file into a read-only FAT second disk at guest path (repeatable)")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    p.add_argument("command", nargs=argparse.REMAINDER, help="command to run (after --)")
     return p
 
 
@@ -76,8 +74,14 @@ def main(argv: list[str] | None = None) -> int:
             files=files,
         )
     except RunnerError as e:
-        print(f"disk-run: {e}", file=sys.stderr)
+        message = f"disk-run: {e}"
+        if getattr(e, "remedy", None):
+            message += f". To fix: {e.remedy}"
+        print(message, file=sys.stderr)
         return e.exit_code
+    except SignalExit as e:
+        print(f"disk-run: {e}", file=sys.stderr)
+        return 128 + e.signum
     sys.stdout.buffer.write(out)
     sys.stdout.buffer.flush()
     return rc
