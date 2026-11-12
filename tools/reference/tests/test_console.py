@@ -107,7 +107,7 @@ class TestMarkerProtocolOverDriver:
 
 class TestPtyDriver:
     def test_eof_stream_reports_console_error(self):
-        driver = PtyDriver(["/bin/true"])
+        driver = PtyDriver(["/usr/bin/true"])
         try:
             with pytest.raises(ConsoleError):
                 driver.read_until("anything", 2.0)
