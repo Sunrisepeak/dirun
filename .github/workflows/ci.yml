@@ -51,6 +51,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The runners sit next to github.com; the CN mirror of the package
+          # index lags main by minutes, so pin the global mirror before any
+          # index-touching step.
+          xlings config --mirror GLOBAL 2>/dev/null || true
           for attempt in 1 2 3 4 5; do
             xlings update > /dev/null 2>&1 || true
             if xlings install "xim:mcpp@$MCPP_VERSION" -y -g; then break; fi
