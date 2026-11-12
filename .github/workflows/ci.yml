@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: pytest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: The suite
+        run: python -m pytest -q
+      - name: The contract holds
+        run: |
+          ! grep -rniE 'mcpp|openkal|xim[^a-z]|xlings' \
+              --include='*.py' --include='*.md' bin diskrun tests
+      - name: The entry answers
+        run: bin/disk-run --help >/dev/null && bin/disk-run --version
