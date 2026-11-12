@@ -1,24 +1,37 @@
-# disk-run
+# dirun
 
 Boot a disk image under QEMU, drive its serial console, run one command inside
 the guest, and return the command's stdout and exit code on the host.
+
+The native implementation is C++23 (`modules/`, built with the mcpp build,
+Python 3.10+ stdlib not needed to run it). The Python under `tools/reference/`
+is the frozen specification of the contract, kept for contract regression —
+not the program users run.
 
 Generic by design: the contract contains no vocabulary of any particular guest
 system. Any CI can use it standalone.
 
 ```sh
 # quickstart: run one command inside a bootable login-style image
-bin/disk-run --image os.qcow2 --accel tcg --timeout 300 -- echo hello
+mcpp run dirun -- --image os.qcow2 --accel tcg --timeout 300 -- echo hello
 # non-login boot flows: supply your own console script
-echo '[{"expect": "# ", "send": ""}]' > boot.json && bin/disk-run --image os.qcow2 --expect boot.json -- echo hello
+echo '[{"expect": "# ", "send": ""}]' > boot.json && mcpp run dirun -- --image os.qcow2 --expect boot.json -- echo hello
+```
+
+## Build and test
+
+```
+mcpp build                 # the program and its libraries
+mcpp test --workspace      # the C++ suite (no qemu needed)
+cd tools/reference && python3 -m pytest   # the frozen contract, as Python
 ```
 
 ## Contract
 
 ```
-disk-run --image <img> [--machine m] [--cpu c] [--memory MiB] [--smp n]
-         [--accel auto|kvm|tcg] [--timeout SEC] [--expect FILE.json]
-         [--env NAME=VAL]... [--file host=guest]... -- <command...>
+dirun --image <img> [--machine m] [--cpu c] [--memory MiB] [--smp n]
+      [--accel auto|kvm|tcg] [--timeout SEC] [--expect FILE.json]
+      [--env NAME=VAL]... [--file host=guest]... -- <command...>
 ```
 
 Behaviour:
@@ -28,7 +41,8 @@ Behaviour:
    mappings (`virt` → aarch64, `vexpress-a9` → arm, …).
 2. **Write isolation** — the base image is never written. A temporary qcow2
    overlay (`qemu-img create -f qcow2 -b <base>`) is booted instead; all
-   temporary files (overlay, file disk, workdir) are removed afterwards.
+   temporary files (overlay, file disk, workdir) are removed afterwards,
+   however the run ends.
 3. **File delivery** — each `--file host=guest` packs host files into a
    read-only raw FAT image attached as a second virtio disk. The commands that
    mount that disk inside the guest belong to each system's console script
@@ -58,7 +72,7 @@ Behaviour:
 | 143   | terminated (SIGTERM) — same cleanup | — |
 
 Every framework error on stderr is one sentence of cause plus one
-"To fix: …" sentence.
+"dirun: … To fix: …" sentence.
 
 ## `--expect FILE.json`
 
@@ -92,27 +106,29 @@ message (`brew install mtools` / system `hdiutil`).
 
 ## Boundary: console drivers belong to each system
 
-The core (`diskrun.protocol`, `diskrun.console`, `diskrun.runner`) is
+The core (`dirun.protocol`, `dirun.console`, `dirun.runner`) is
 guest-agnostic. Everything that knows how a particular image boots — its login
 prompt, its mount commands, its shell — lives in the per-system expect script
 passed via `--expect`. The built-in login-style default is one such policy and
 can be ignored entirely.
 
+## Platform support
+
+Linux and macOS are fully covered, pty console included. The pty driver is a
+thin native layer; a system without one in this build (Windows today) gets a
+clear "not built" error from the console and its pty tests skip — the rest of
+the program builds and runs unchanged.
+
+## Distribution (planned)
+
+Not in this release: the future packaging is an xpkg payload plus an `.oke`
+(ok image) dual channel, decided when the program ships; nothing in the
+contract depends on it.
+
 ## Requirements
 
-- Python 3.10+ (stdlib only: `pty`, `select`, `subprocess`, `tempfile`, `json`)
 - `qemu-system-<arch>`, `qemu-img`; for `--file`: mtools (`mkfs.vfat`/`mcopy`)
   or, on macOS, the system `hdiutil`
-
-## Development
-
-```
-python -m pytest          # mock-layer tests; no QEMU needed
-bin/disk-run --help
-```
-
-Real-QEMU integration tests auto-skip unless `qemu-system-x86_64` and
-`DISK_RUN_TEST_IMAGE` (path to a bootable login-style image) are available.
 
 ## License
 

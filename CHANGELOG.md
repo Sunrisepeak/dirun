@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0 — 2026-11-12
+
+The native implementation (PR #1); the contract is unchanged from 0.1.2.
+
+- C++23 is the one implementation users run: a workspace of three libraries
+  (`protocol`, `console`, `runner`) and the `dirun` program; the 0.1.x Python
+  moves to `tools/reference/` as the frozen specification, its suite still
+  runs in CI as contract regression.
+- The console driver's pty is a thin native layer (openpty, poll loop,
+  process-group end, EBADF/EIO normalised) with a clear "not built" face on a
+  system without one; its tests skip there.
+- The runner's system touch points (qemu-img, the FAT tooling, the qemu
+  channel) go through declared seams, so the suite covers the whole exit-code
+  space, the overlay isolation, the mtools/hdiutil file-disk paths and the
+  signal cleanup without qemu installed.
+- A words check (`tools/checks/words.py`) enforces the no-ecosystem-vocabulary
+  contract on the sources and docs, build configuration aside.
+
 
 ## 0.1.2 — 2026-11-12
 

@@ -1,0 +1,25 @@
+# The runner: qemu invocation, the write-isolated overlay, the file disk, the
+# exit-code mapping. Tools that touch the system (qemu-img, the FAT tooling) go
+# through one seam so a test can answer for them; qemu itself goes through the
+# console module's pty driver.
+[package]
+name        = "dirun-runner"
+version     = "0.2.0"
+description = "Runner for dirun: boot an image, run one command, map the exit codes"
+license     = "Apache-2.0"
+
+[targets.dirun-runner]
+kind = "lib"
+
+[lib]
+path = "src/runner.cppm"
+
+[dependencies]
+dirun-protocol = { path = "../protocol" }
+dirun-console  = { path = "../console" }
+
+[dependencies.mcpplibs]
+os.workspace = true
+
+[dev-dependencies]
+dirun-testing = { path = "../testing" }

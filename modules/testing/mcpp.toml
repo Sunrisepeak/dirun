@@ -1,0 +1,14 @@
+# The minimal test protocol the suite reports through: named cases, expectations,
+# a summary exit code. mcpp runs every tests/**/*.cpp as a program; a test
+# passes when it exits zero (report() returns non-zero when any failed).
+[package]
+name        = "dirun-testing"
+version     = "0.2.0"
+description = "Test support for dirun: named test cases, expectations, a summary exit code"
+license     = "Apache-2.0"
+
+[targets.dirun-testing]
+kind = "lib"
+
+[lib]
+path = "src/testing.cppm"

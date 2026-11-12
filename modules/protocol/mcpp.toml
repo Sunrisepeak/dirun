@@ -1,0 +1,15 @@
+# The marker protocol: pure text transformation, no system in it.
+[package]
+name        = "dirun-protocol"
+version     = "0.2.0"
+description = "The marker protocol dirun speaks to a guest shell: wrapping, escaping, splitting"
+license     = "Apache-2.0"
+
+[targets.dirun-protocol]
+kind = "lib"
+
+[lib]
+path = "src/protocol.cppm"
+
+[dev-dependencies]
+dirun-testing = { path = "../testing" }
