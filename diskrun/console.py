@@ -29,6 +29,20 @@ class ConsoleError(Exception):
     """Console channel broke (EOF) or a pattern never matched."""
 
 
+def _close_fd(fd: int) -> None:
+    """Close an fd exactly once; a dead fd is not an error here."""
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def _closed_error(exc: OSError) -> ConsoleError:
+    """Normalise EBADF/EIO (kernel-dependent faces of a dead pty master)."""
+    why = os.strerror(exc.errno) if exc.errno is not None else str(exc)
+    return ConsoleError(f"console closed: {why} (errno {exc.errno})")
+
+
 class PtyDriver:
     """Drives a child process whose stdio is a serial console on a pty."""
 
@@ -52,29 +66,37 @@ class PtyDriver:
                 close_fds=True,
                 start_new_session=True,  # own process group: signals kill qemu and helpers
             )
-        except OSError as e:
-            os.close(master)
-            os.close(slave)
+        except OSError:
+            # Each fd closed exactly once: a double close would raise EBADF
+            # here and mask the real spawn error.
+            _close_fd(master)
+            _close_fd(slave)
             raise
-        finally:
-            os.close(slave)
+        _close_fd(slave)
         self.master = master
 
     # -- low level ---------------------------------------------------------
     def _read_more(self, timeout: float) -> bool:
-        """Read once; return True if bytes arrived. False on EOF/timeout."""
+        """Read once; return True if bytes arrived. False on EOF/timeout.
+
+        OSError on the pty master (EBADF, EIO — what a dead qemu leaves behind,
+        differing by kernel) is normalised to ``ConsoleError("console closed:
+        <errno text>")`` and never escapes raw.
+        """
         if self.proc.poll() is not None:
             return False
         try:
             r, _, _ = select.select([self.master], [], [], max(0.0, timeout))
-        except (OSError, ValueError):
+        except ValueError:
             return False
+        except OSError as e:
+            raise _closed_error(e) from e
         if not r:
             return False
         try:
             data = os.read(self.master, 4096)
-        except OSError:
-            return False
+        except OSError as e:
+            raise _closed_error(e) from e
         if not data:
             return False
         self._buffer += data

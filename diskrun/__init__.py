@@ -1,6 +1,6 @@
 """disk-run: boot a disk image, drive its console, return program output and rc."""
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 from .console import ConsoleError, ExpectMachine, PtyDriver, load_script, run_marker_command
 from .protocol import BEGIN, escape_sharg, normalize_output, split_output, wrap_command

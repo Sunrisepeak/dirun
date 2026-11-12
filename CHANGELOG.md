@@ -1,5 +1,18 @@
 # Changelog
 
+
+## 0.1.2 — 2026-11-12
+
+CI portability fix for the pty driver.
+
+- Any OSError on the pty master (EBADF/EIO — kernel-dependent faces of a dead
+  console) is normalised to `ConsoleError("console closed: <errno text>")`;
+  it never escapes raw from `select`/`read`.
+- Constructor no longer double-closes the slave fd when the child fails to
+  spawn; a spawn error now surfaces as itself instead of a masking EBADF.
+- Tests: direct EBADF (real closed master) and EIO (injected errno) forms,
+  plus the spawn-failure non-masking case.
+
 ## 0.1.1 — 2026-11-12
 
 Hardening (no contract surface changes).

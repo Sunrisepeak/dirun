@@ -134,3 +134,39 @@ class TestPtyDriver:
             assert len(sleeps) == 3
         finally:
             driver.close()
+
+    def test_read_after_master_close_reports_console_closed(self):
+        """EBADF form: master fd closed under us -> ConsoleError, never raw OSError."""
+        import os
+
+        driver = PtyDriver(["/bin/sleep", "30"])
+        try:
+            os.close(driver.master)  # fd goes bad while the child still runs
+            with pytest.raises(ConsoleError, match=r"console closed: Bad file descriptor"):
+                driver.read_until(b"anything", 2.0)
+        finally:
+            driver.close()  # must tolerate the already-dead fd
+
+    def test_eio_form_reports_console_closed(self, monkeypatch):
+        """EIO form: what a Linux kernel hands back once the guest pty side dies."""
+        import errno
+
+        driver = PtyDriver(["/bin/cat"])
+        try:
+            def raise_eio(fd, n):
+                raise OSError(errno.EIO, "Input/output error")
+
+            monkeypatch.setattr("diskrun.console.os.read", raise_eio)
+            driver.send("x", throttle=False)  # make the master readable first
+            with pytest.raises(ConsoleError, match=r"console closed: Input/output error"):
+                driver.read_until(b"anything", 2.0)
+        finally:
+            driver.close()
+
+    def test_popen_failure_is_not_masked_by_double_close(self):
+        """Spawn failure must surface as itself, not as a spurious EBADF."""
+        missing = "/nonexistent/disk-run-probe-binary"
+        with pytest.raises(FileNotFoundError):
+            PtyDriver([missing])
+
+
