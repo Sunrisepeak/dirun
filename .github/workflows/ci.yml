@@ -80,8 +80,10 @@ jobs:
 
       - name: The frozen contract, as Python (reference)
         shell: bash
+        run: |
+          python -m pip install --quiet pytest
+          python -m pytest -q
         working-directory: tools/reference
-        run: python -m pytest -q
 
       - name: The zero-ecosystem-words contract
         shell: bash
