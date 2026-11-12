@@ -139,7 +139,7 @@ int main() {
 
 #if !defined(_WIN32)  // the pty driver: a posix face
     "a stream that ends without the pattern is an error"_test = [] {
-        c::PtyDriver driver{{"/bin/true"}};
+        c::PtyDriver driver{{"/usr/bin/true"}};
         bool threw = false;
         try { (void)driver.read_until("anything", 2.0); } catch (const c::ConsoleError&) { threw = true; }
         expect(threw);

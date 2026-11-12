@@ -88,7 +88,7 @@ public:
     std::optional<std::string> find(const std::string& name) override {
         const auto found = os::env::find_executable(name);
         if (!found || found->empty()) return std::nullopt;
-        return *found;
+        return found->string();
     }
 };
 
