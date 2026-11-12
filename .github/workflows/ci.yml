@@ -19,6 +19,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: The suite's runner
+        run: python -m pip install --quiet pytest
       - name: The suite
         run: python -m pytest -q
       - name: The contract holds
