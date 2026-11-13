@@ -5,23 +5,41 @@
 # file must not change depending on which command ran last.
 version = 2
 
+[package."marzer.tomlplusplus"]
+namespace = "marzer"
+version = "3.4.0"
+source  = "index+marzer@3.4.0"
+hash    = "fnv1a:1420a0be548b3b22"
+
+[package."mcpplibs.cmdline"]
+namespace = "mcpplibs"
+version = "0.0.3"
+source  = "index+mcpplibs@0.0.3"
+hash    = "fnv1a:aad61199abc2c304"
+
+[package."mcpplibs.mtest"]
+namespace = "mcpplibs"
+version = "0.7.1"
+source  = "index+mcpplibs@0.7.1"
+hash    = "fnv1a:2af53286d2921d56"
+
 [package."openkal"]
 namespace = "mcpplibs"
-version = "0.24.0"
-source  = "index+mcpplibs@0.24.0"
-hash    = "fnv1a:7264ed077cd83703"
+version = "0.25.1"
+source  = "index+mcpplibs@0.25.1"
+hash    = "fnv1a:68ef4b0777428faf"
 
 [package."openkal-linux"]
 namespace = "mcpplibs"
-version = "0.25.0"
-source  = "index+mcpplibs@0.25.0"
-hash    = "fnv1a:34912a331a4386f5"
+version = "0.26.3"
+source  = "index+mcpplibs@0.26.3"
+hash    = "fnv1a:3d1f58331f143b11"
 
 [package."mcpplibs.os"]
 namespace = "mcpplibs"
-version = "0.3.0"
-source  = "index+mcpplibs@0.3.0"
-hash    = "fnv1a:c8fc75a4fc0fce2a"
+version = "0.4.4"
+source  = "index+mcpplibs@0.4.4"
+hash    = "fnv1a:c06e46a4f73f185b"
 
 [package."nlohmann.json"]
 namespace = "nlohmann"

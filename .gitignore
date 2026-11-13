@@ -1,6 +1,2 @@
-__pycache__/
-*.pyc
-.pytest_cache/
-dist/
-*.egg-info/
 target/
+.mtest/

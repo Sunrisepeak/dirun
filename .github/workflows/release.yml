@@ -1,0 +1,39 @@
+name: Release
+
+# A tag `v<version>` releases the package CI built: the version is the manifest's, and the notes
+# are the changelog's entry for it.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: package
+          path: dist
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          manifest=$(sed -n 's/^version *= *"\(.*\)"/\1/p' mcpp.toml | head -1)
+          [ "$manifest" = "$version" ] || { echo "::error::the tag is $version and the manifest $manifest"; exit 1; }
+          notes="$RUNNER_TEMP/notes.md"
+          awk -v v="$version" '$0 ~ "^## " v " " {p=1; next} /^## / {p=0} p' CHANGELOG.md > "$notes"
+          [ -s "$notes" ] || { echo "::error::CHANGELOG.md has no entry for $version"; exit 1; }
+          (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+          gh release create "$GITHUB_REF_NAME" dist/* --target "$GITHUB_SHA" --title "dirun $version" --notes-file "$notes"

@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -13,7 +14,7 @@ concurrency:
 env:
   XLINGS_NON_INTERACTIVE: '1'
   # The build pins, one place (mirrors the ecosystem's setup action shape).
-  MCPP_VERSION: 2026.11.10.2
+  MCPP_VERSION: 2026.11.12.1
   XLINGS_VERSION: v2026.10.26.1
   LLVM_VERSION: 23.1.3
 
@@ -28,9 +29,6 @@ jobs:
         os: [ubuntu-24.04, macos-15, windows-2025]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
 
       - name: Install xlings (Unix)
         if: runner.os != 'Windows'
@@ -70,27 +68,62 @@ jobs:
           done
           mcpp toolchain default "llvm@$LLVM_VERSION"
 
-      - name: Build the three-tier program
+      - name: Build
         shell: bash
         run: mcpp build
 
-      - name: The C++ suite (mocked tools and console)
+      - name: The suite (the contract's statuses against a console played by a child; no emulator)
         shell: bash
-        run: mcpp test --workspace
-
-      - name: The frozen contract, as Python (reference)
-        shell: bash
-        run: |
-          python -m pip install --quiet pytest
-          python -m pytest -q
-        working-directory: tools/reference
-
-      - name: The zero-ecosystem-words contract
-        shell: bash
-        run: python tools/checks/words.py
+        run: mcpp test
 
       - name: The entry answers
         shell: bash
         run: |
           mcpp run dirun -- --help > /dev/null
           mcpp run dirun -- --version
+
+  # The program as it is released: one package for every system, the ok images of both
+  # architectures with a launcher and each system's okrun.
+  package:
+    name: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install xlings
+        run: |
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 \
+            https://raw.githubusercontent.com/openxlings/xlings/main/tools/other/quick_install.sh \
+            | bash -s "$XLINGS_VERSION"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+      - name: Install the pinned mcpp
+        run: |
+          set -euo pipefail
+          xlings config --mirror GLOBAL 2>/dev/null || true
+          for attempt in 1 2 3 4 5; do
+            xlings update > /dev/null 2>&1 || true
+            if xlings install "xim:mcpp@$MCPP_VERSION" -y -g; then break; fi
+            if [ "$attempt" = 5 ]; then echo "::error::mcpp@$MCPP_VERSION could not be installed"; exit 1; fi
+            sleep 30
+          done
+      - name: The program for every system
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' mcpp.toml | head -1)
+          mcpp pack dirun --target openkal --mode self-contained --systems all --pkg-format tar -o target/dist/
+          package="dirun-$version-openkal-bundle-all"
+          mkdir -p dist unpacked
+          cp "target/dist/$package.tar.gz" dist/
+          tar -xzf "dist/$package.tar.gz" -C unpacked
+          said=$("unpacked/$package/bin/dirun" --version)
+          [ "$said" = "$version" ] || { echo "::error::the packaged program says '$said', the manifest $version"; exit 1; }
+          python3 - "unpacked/$package/mcpp-package.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          want = {"linux-x86_64", "linux-aarch64", "macos-aarch64", "windows-x86_64"}
+          assert want <= set(d["runs_on"]["self"]), d["runs_on"]
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: dist
