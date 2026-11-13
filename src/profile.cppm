@@ -81,6 +81,7 @@ struct profile {
     std::optional<relay> events;
     std::optional<payload> boot_payload;
     std::string origin;              // the file it came from, or "built-in"
+    std::string dir;                 // the directory of that file, `{profile-dir}'; empty when built in
 };
 
 // The profile the program carries, `posix-login'.
@@ -309,6 +310,7 @@ std::expected<profile, std::string> load(const std::filesystem::path& file) {
     if (!p)
         return p;
     const auto here = std::filesystem::absolute(file).parent_path();
+    p->dir = here.generic_string();
     auto beside_profile = [&](std::string& name) {
         if (!name.empty() && std::filesystem::path(name).is_relative())
             name = (here / name).generic_string();

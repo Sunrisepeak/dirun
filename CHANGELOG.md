@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2 -- 2026-11-13
+
+- **`{profile-dir}` is the directory of the profile's file.** A profile names a file shipped beside
+  it as `{profile-dir}/<name>`: a firmware package that carries its profile states the firmware
+  image the emulator boots, and a runner statement names only the profile. `--var` does not
+  replace it.
+
 ## 0.3.1 -- 2026-11-13
 
 - **The image is attached in snapshot mode** (`snapshot=on`): the emulator keeps the guest's writes

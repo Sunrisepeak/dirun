@@ -1,6 +1,6 @@
 [package]
 name        = "dirun"
-version     = "0.3.1"
+version     = "0.3.2"
 description = "Run one command inside a booted disk image, or boot a payload, and return its output and exit code"
 license     = "Apache-2.0"
 repo        = "https://github.com/Sunrisepeak/dirun"
