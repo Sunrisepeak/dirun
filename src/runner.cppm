@@ -1,10 +1,10 @@
-// The runner: QEMU's command line, the write-isolated overlay, the files disk, the guest and payload
+// The runner: QEMU's command line, the image booted in snapshot mode, the files disk, the guest and payload
 // modes, and the exit codes (docs/contract.md):
 //
 //     0-255  the program's own status (guest), or the payload's (payload), passed through
 //     124    the run's time limit expired first
 //     125    the console ended, or a marker never came
-//     126    a prerequisite is unusable (qemu, the image, the profile, a file to deliver)
+//     126    a prerequisite is unusable (the emulator, the image, the profile, a file to deliver)
 //     130    interrupted (SIGINT); 143 terminated (SIGTERM); the emulator is ended either way
 module;
 #include <csignal>
@@ -13,7 +13,6 @@ export module dirun.runner;
 import std;
 import mcpplibs.os;
 import mcpplibs.mtest.e2e;
-import nlohmann.json;
 import dirun.profile;
 import dirun.protocol;
 
@@ -35,35 +34,6 @@ public:
 private:
     std::string text_;
     int code_;
-};
-
-// How the system's tools run (qemu-img): one seam, so a test answers
-// for them without any being present.
-struct tool_result {
-    int status = -1;
-    std::string out, err;
-};
-class tools {
-public:
-    virtual ~tools() = default;
-    virtual tool_result run(const std::vector<std::string>& argv) = 0;
-    virtual bool has(const std::string& program) = 0;
-};
-class system_tools final : public tools {
-public:
-    tool_result run(const std::vector<std::string>& argv) override {
-        os::process::spawn_options o;
-        o.program = os::fs::from_utf8(argv.front());
-        o.args.assign(argv.begin() + 1, argv.end());
-        o.in = os::process::stdio::null;
-        auto r = os::process::run(o);
-        if (!r)
-            return {127, "", r.error().message()};
-        return {r->status.shell_code(), std::move(r->out), std::move(r->err)};
-    }
-    bool has(const std::string& program) override {
-        return os::env::find_executable(program).has_value();
-    }
 };
 
 struct file_delivery {
@@ -92,10 +62,9 @@ struct options {
     double timeout = 300;
     std::string trace;  // a file the console's transcript is written to, however the run ends
     // The emulator's command in place of `qemu-system-<arch>' found on PATH (--emulator: a runner
-    // that installs its emulator names it). Test seams: the tools, a fixed work directory (removed
-    // all the same).
+    // that installs its emulator names it). Test seam: a fixed work directory (removed all the
+    // same).
     std::vector<std::string> emulator;
-    tools* with_tools = nullptr;
     std::optional<std::filesystem::path> workdir;
 };
 
@@ -163,22 +132,6 @@ std::string expanded(const std::string& text, const std::map<std::string, std::s
     if (!e)
         throw error("the profile: " + e.error(), exit_unusable);
     return *e;
-}
-
-std::string probe_format(const std::string& image, tools& t) {
-    if (!t.has("qemu-img"))
-        throw error("qemu-img is not on PATH", exit_unusable, "install qemu (qemu-img ships with it)");
-    auto info = t.run({"qemu-img", "info", "--output=json", image});
-    if (info.status != 0)
-        throw error("qemu-img cannot read " + image + ": " + info.err, exit_unusable,
-                    "check the image with `qemu-img info <image>`");
-    // The image's own format is the top-level `format'; the layers below it (the `file' protocol
-    // that newer qemu-img lists first among `children') have formats of their own.
-    auto j = nlohmann::json::parse(info.out, nullptr, false);
-    if (j.is_discarded() || !j.is_object() || !j.contains("format") || !j["format"].is_string())
-        throw error("qemu-img names no format for " + image, exit_unusable,
-                    "check the image with `qemu-img info <image>`");
-    return j["format"].get<std::string>();
 }
 
 // The files gathered in a directory that the emulator presents as a read-only FAT disk (QEMU's
@@ -324,7 +277,7 @@ delivery deliver(const options& o) {
     return d;
 }
 
-result run_guest(const options& o, tools& t, const clock& c) {
+result run_guest(const options& o, const clock& c) {
     const auto& p = o.prof;
     const auto image = o.image.empty() ? p.vm.image : o.image;
     if (image.empty())
@@ -354,22 +307,27 @@ result run_guest(const options& o, tools& t, const clock& c) {
             throw error("the profile: [command] script: " + short_line.error(), exit_unusable);
         line = *short_line;
     }
-    const auto format = probe_format(image, t);
-    const auto overlay = dir.path() / "overlay.qcow2";
-    if (auto r = t.run({"qemu-img", "create", "-q", "-f", "qcow2", "-b",
-                        str(std::filesystem::absolute(os::fs::from_utf8(image))), "-F", format, str(overlay)});
-        r.status != 0)
-        throw error("the overlay could not be made: " + r.err, exit_unusable, "check the image with `qemu-img info <image>`");
     std::optional<std::string> disk;
     if (!d.files.empty())
         disk = files_dir(d.files, dir.path());
     const auto arch = o.arch.value_or(p.vm.arch);
     auto argv = qemu_words(o, arch);
-    argv.insert(argv.end(), {"-drive", "file=" + str(overlay) + ",if=virtio,format=qcow2"});
+    // NEVER WRITTEN: the emulator keeps the guest's writes in a temporary overlay of its own
+    // (`snapshot=on'), which it discards when it ends, and reads the image's format itself unless
+    // the profile states it. No tool of the host's makes an overlay.
+    std::string drive = "file=" + str(std::filesystem::absolute(os::fs::from_utf8(image))) + ",if=virtio,snapshot=on";
+    if (!p.vm.format.empty())
+        drive += ",format=" + p.vm.format;
+    argv.insert(argv.end(), {"-drive", drive});
     if (disk)
         argv.insert(argv.end(), {"-drive", "file=fat:" + *disk + ",if=virtio,format=raw,readonly=on"});
 
-    auto s = e2e::session::start({.argv = argv});
+    // The emulator's temporary files --- the snapshot overlay --- are in the run's directory,
+    // removed with it; a system's own temporary directory may not exist (measured: no /var/tmp).
+    e2e::command started{.argv = argv};
+    for (const char* name : {"TMPDIR", "TMP", "TEMP"})
+        started.env.emplace_back(name, str(dir.path()));
+    auto s = e2e::session::start(started);
     if (!s.started())
         throw error(std::format("{} did not start: {}", argv.front(), s.transcript()), exit_unusable,
                     "install qemu (it provides " + argv.front() + ")");
@@ -558,12 +516,10 @@ std::vector<std::string> qemu_words(const options& o, const std::string& arch) {
 }
 
 result run(const options& o) {
-    system_tools sys;
-    tools& t = o.with_tools ? *o.with_tools : sys;
     signals guard;
     const clock c{.limit = o.timeout};
     try {
-        return o.payload.empty() ? run_guest(o, t, c) : run_payload(o, c);
+        return o.payload.empty() ? run_guest(o, c) : run_payload(o, c);
     } catch (const interrupted& i) {
         return {128 + i.signal, {}, i.signal};
     }

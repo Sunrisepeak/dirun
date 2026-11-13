@@ -1,6 +1,6 @@
 [package]
 name        = "dirun"
-version     = "0.3.0"
+version     = "0.3.1"
 description = "Run one command inside a booted disk image, or boot a payload, and return its output and exit code"
 license     = "Apache-2.0"
 repo        = "https://github.com/Sunrisepeak/dirun"
@@ -20,4 +20,3 @@ mcpplibs.os         = "^0.4.4"
 mcpplibs.cmdline    = "0.0.3"
 mcpplibs.mtest      = "^0.7.1"
 marzer.tomlplusplus = "3.4.0"
-nlohmann.json       = "3.12.0"

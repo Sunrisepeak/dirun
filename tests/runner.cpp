@@ -31,6 +31,9 @@ child guest{"fake-guest", [](std::vector<std::string> args) {
     }
     // The files disk, as QEMU's `fat:' driver would present the directory it names.
     std::string disk;
+    bool snapshot = false;
+    for (const auto& a : args)
+        snapshot = snapshot || a.find("snapshot=on") != std::string::npos;
     for (const auto& a : args)
         if (auto at = a.find("file=fat:"); at != std::string::npos) {
             const auto dir = a.substr(at + 9, a.find(',', at) - at - 9);
@@ -81,6 +84,8 @@ child guest{"fake-guest", [](std::vector<std::string> args) {
         }
         if (!disk.empty())
             out += "disk:" + disk;
+        if (snapshot)
+            out += " snapshot";
         std::cout << line << "\r\n@@BEGIN@@\r\n" << out << "\r\n@@STATUS=" << status << "@@\r\n# " << std::flush;
     }
     return 0;
@@ -110,23 +115,11 @@ child dos{"fake-dos", [](std::vector<std::string> args) {
 
 namespace {
 
-struct fake_tools final : runner::tools {
-    std::vector<std::vector<std::string>> calls;
-    runner::tool_result run(const std::vector<std::string>& argv) override {
-        calls.push_back(argv);
-        if (argv.size() > 1 && argv[1] == "info")
-            return {0, R"({"children":[{"info":{"format":"file"}}],"format":"qcow2"})", ""};
-        return {0, "", ""};
-    }
-    bool has(const std::string&) override { return true; }
-};
-
-runner::options guest_options(std::string mode, fake_tools& t) {
+runner::options guest_options(std::string mode) {
     runner::options o;
     o.image = (temp_dir() / "base.qcow2").generic_string();
     std::ofstream(o.image) << "base";
     o.emulator = child_command("fake-guest", std::vector<std::string>{std::move(mode)});
-    o.with_tools = &t;
     o.timeout = 30;
     return o;
 }
@@ -134,8 +127,7 @@ runner::options guest_options(std::string mode, fake_tools& t) {
 }  // namespace
 
 UTest status{"the command's output and status pass through", [] {
-    fake_tools t;
-    auto o = guest_options("password", t);
+    auto o = guest_options("password");
     o.command = {"say", "hello", "exit", "7"};
     o.env = {{"V", "env-value"}};
     auto r = runner::run(o);
@@ -144,24 +136,15 @@ UTest status{"the command's output and status pass through", [] {
     expect(contains(r.output, "env-value")) << "the environment reaches the command";
 }};
 
-UTest overlay{"the base image is the backing of an overlay, read with its top-level format", [] {
-    fake_tools t;
-    auto o = guest_options("password", t);
+UTest snapshot{"the image is booted in snapshot mode: the emulator keeps the writes and the image is not written", [] {
+    auto o = guest_options("password");
     o.command = {"say", "x"};
-    (void)runner::run(o);
-    bool created = false;
-    for (const auto& c : t.calls)
-        if (c.size() > 1 && c[1] == "create") {
-            created = true;
-            expect(eq(c[std::size_t(std::ranges::find(c, std::string("-F")) - c.begin()) + 1], std::string("qcow2")))
-                << "the backing format is the image's, not its file layer's";
-        }
-    expect(created);
+    auto r = runner::run(o);
+    expect(contains(r.output, "snapshot")) << "the drive is attached with snapshot=on";
 }};
 
 UTest optional_step{"an optional step is passed over when the next prompt comes first", [] {
-    fake_tools t;
-    auto o = guest_options("nopassword", t);
+    auto o = guest_options("nopassword");
     o.command = {"say", "ok", "exit", "0"};
     auto r = runner::run(o);
     expect(eq(r.status, 0));
@@ -169,8 +152,7 @@ UTest optional_step{"an optional step is passed over when the next prompt comes 
 }};
 
 UTest codes{"each way a run cannot finish has its code", [] {
-    fake_tools t;
-    auto timeout = guest_options("silent", t);
+    auto timeout = guest_options("silent");
     timeout.command = {"x"};
     timeout.timeout = 2;
     try {
@@ -179,7 +161,7 @@ UTest codes{"each way a run cannot finish has its code", [] {
     } catch (const runner::error& e) {
         expect(eq(e.code(), runner::exit_timeout)) << e.what();
     }
-    auto dies = guest_options("dies", t);
+    auto dies = guest_options("dies");
     dies.command = {"x"};
     try {
         (void)runner::run(dies);
@@ -187,7 +169,7 @@ UTest codes{"each way a run cannot finish has its code", [] {
     } catch (const runner::error& e) {
         expect(eq(e.code(), runner::exit_no_console)) << e.what();
     }
-    auto missing = guest_options("password", t);
+    auto missing = guest_options("password");
     missing.command = {"x"};
     missing.image = (temp_dir() / "absent.qcow2").generic_string();
     try {
@@ -196,7 +178,7 @@ UTest codes{"each way a run cannot finish has its code", [] {
     } catch (const runner::error& e) {
         expect(eq(e.code(), runner::exit_unusable));
     }
-    auto noqemu = guest_options("password", t);
+    auto noqemu = guest_options("password");
     noqemu.command = {"x"};
     noqemu.emulator = {(temp_dir() / "no-such-emulator").generic_string()};
     try {
@@ -245,8 +227,7 @@ UTest payload_never_started{"a payload whose boot never ended did not run, whate
 }};
 
 UTest delivered{"a program of this machine is delivered on the files disk and run from its copy", [] {
-    fake_tools t;
-    auto o = guest_options("password", t);
+    auto o = guest_options("password");
     const auto program = temp_dir() / "prog";
     std::ofstream(program) << "binary";
     o.command = {program.generic_string(), "arg"};
@@ -256,8 +237,7 @@ UTest delivered{"a program of this machine is delivered on the files disk and ru
 }};
 
 UTest relayed{"a test runner's events written in the guest are appended to its report", [] {
-    fake_tools t;
-    auto o = guest_options("password", t);
+    auto o = guest_options("password");
     const auto report = temp_dir() / "report.ndjson";
     std::ofstream(report) << "{\"event\":\"before\"}\n";
     o.protocol = runner::options::test_protocol{"1", report.generic_string(), "run", ""};
@@ -303,8 +283,7 @@ output-file = "OUT.TXT"
 }};
 
 UTest long_line{"a command line longer than the console takes is written to the files disk and run from it", [] {
-    fake_tools t;
-    auto o = guest_options("password", t);
+    auto o = guest_options("password");
     const std::string word(400, 'w');
     o.command = {"say", word, "exit", "3"};
     auto r = runner::run(o);

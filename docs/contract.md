@@ -22,8 +22,9 @@ marked, however the run ends.
 ## Guest mode
 
 1. The image is `--image`, else the profile's `[machine] image` (a profile that ships with an image
-   names it). Its format is read (`qemu-img info`, the top-level `format`); a qcow2 overlay backed
-   by the image is created in a temporary directory and booted. The image is never written.
+   names it). It is attached in snapshot mode (`snapshot=on`): the emulator keeps the guest's
+   writes in a temporary overlay of its own, in the run's directory, and the image is never
+   written. Its format is the profile's `[machine] format`, else the one the emulator reads.
 2. The files: each `--file`, a program of this machine that `COMMAND` names first (it is run from
    its copy, at the profile's `[files] at`), and the test protocol's selection (below). They are
    gathered in a directory the emulator presents as a read-only FAT disk with one partition
