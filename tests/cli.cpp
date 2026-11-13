@@ -3,6 +3,7 @@ import std;
 import mcpplibs.mtest;
 import dirun.cli;
 import dirun.runner;
+import dirun.profile;
 
 using namespace mcpplibs::mtest;
 using run_kind = dirun::cli::parsed::kind;
@@ -77,6 +78,20 @@ status = "S(\\d+)"
     expect(fatal(eq(p.what, run_kind::run))) << p.message;
     expect(p.options.image.empty()) << "the profile's image is the runner's to take";
     expect(contains(p.options.prof.vm.image, "disk.qcow2"));
+}};
+
+UTest profile_dir{"{profile-dir} is the profile's directory, which --var does not replace", [] {
+    std::ofstream(temp_dir() / "firmware-profile.toml") << R"toml([payload]
+args   = ["-bios", "{profile-dir}/code.fd", "-drive", "file=fat:{dir}"]
+place  = "BOOT.EFI"
+status = "debug-exit"
+)toml";
+    auto p = parse({"--payload", "x.efi", "--profile", (temp_dir() / "firmware-profile.toml").generic_string(),
+                    "--var", "profile-dir=/elsewhere"});
+    expect(fatal(eq(p.what, run_kind::run))) << p.message;
+    const auto dir = std::filesystem::absolute(temp_dir()).generic_string();
+    expect(eq(p.options.vars.at("profile-dir"), dir));
+    expect(eq(*dirun::profile::expand(p.options.prof.boot_payload->args[1], p.options.vars), dir + "/code.fd"));
 }};
 
 UTest statuses{"the program returns the run's status, 0 for help and the version, 2 for a wrong line", [] {

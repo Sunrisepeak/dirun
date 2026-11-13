@@ -4,7 +4,9 @@ A profile is a TOML file that states how a disk image boots and runs a command, 
 boots and returns its status. It ships with the image or the board it describes; dirun carries one,
 `posix-login` ([profiles/posix-login.toml](../profiles/posix-login.toml)), used when `--profile` is
 not given. A key a profile does not have is an error. `{name}` is replaced by `--var name=...`
-(`{{` and `}}` are one brace).
+(`{{` and `}}` are one brace). `{profile-dir}` is the directory of the profile's file, so a profile
+names a file shipped beside it, such as a firmware image, as `{profile-dir}/<name>`; `--var` does
+not replace it.
 
 ```toml
 name = "freebsd-14"

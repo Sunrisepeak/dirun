@@ -13,7 +13,7 @@ import dirun.runner;
 
 export namespace dirun::cli {
 
-inline constexpr std::string_view version = "0.3.1";
+inline constexpr std::string_view version = "0.3.2";
 
 // What a command line describes, without running it.
 struct parsed {
@@ -140,6 +140,9 @@ std::expected<runner::options, std::string> options_of(const cmdline::ParsedArgs
     };
     if (auto e = pairs("var", [&](auto kv) { o.vars[kv.first] = kv.second; }))
         return fail(*e);
+    // A profile names a file shipped beside it, such as a firmware image, as {profile-dir}/<name>.
+    if (!o.prof.dir.empty())
+        o.vars["profile-dir"] = o.prof.dir;
     // This machine's variables the command is given (--pass NAME, --pass PREFIX*).
     if (auto it = a->opts.find("pass"); it != a->opts.end())
         for (const auto& entry : os::env::variables()) {
