@@ -1,0 +1,41 @@
+# The built-in guest profile: a POSIX system that logs `root' in on its serial console with no
+# password, or with the password `root'. A disk image ships its own profile beside it
+# (docs/profiles.md); this one is what `dirun --image' uses when none is named.
+name = "posix-login"
+
+[machine]
+arch   = "x86_64"
+memory = 512
+smp    = 1
+
+[[boot]]
+expect  = "login: "
+send    = "root"
+timeout = 300
+
+[[boot]]
+expect   = "Password:"
+send     = "root"
+optional = true              # the next step's prompt came first: no password is asked
+
+[[boot]]
+expect = "# |\\$ "
+
+[command]
+prepare = ["stty -echo"]
+line    = "echo @@BEGIN@@; {env}{argv} < /dev/null; echo @@STATUS=$?@@"
+env     = "env {assignments} "
+quote   = "posix"
+begin   = "@@BEGIN@@"
+status  = "@@STATUS=(\\d+)@@"
+# A longer line is written to the files disk and run from there: a terminal's canonical input
+# bounds a typed line, and one past it never reaches the shell whole.
+line-max = 200
+script   = "sh {script}"
+
+[files]
+mount = ["mkdir -p /mnt/dirun", "mount -r -t msdosfs /dev/vtbd1s1 /mnt/dirun 2>/dev/null || mount -r /dev/vdb1 /mnt/dirun"]
+at    = "/mnt/dirun"
+
+[relay]
+report = "/tmp/dirun-mtest.ndjson"
