@@ -8,6 +8,10 @@
   carry it (qemu-x86) boots a disk image. The emulator's temporary files are in the run's directory
   (`TMPDIR`, `TMP`, `TEMP`), which is removed with the run: a system's own temporary directory may
   not exist. The program no longer depends on a JSON library.
+- **The command line is run by cmdline** (0.0.4): the program is one command whose action returns
+  the run's status. Help and the version return 0; a wrong command line is written to standard
+  error, as `dirun: <reason>` and `dirun: see 'dirun --help'`, and returns 2. Standard output
+  carries only the command's output. The command line itself is unchanged.
 
 ## 0.3.0 -- 2026-11-13
 

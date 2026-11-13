@@ -2,6 +2,7 @@
 import std;
 import mcpplibs.mtest;
 import dirun.cli;
+import dirun.runner;
 
 using namespace mcpplibs::mtest;
 using run_kind = dirun::cli::parsed::kind;
@@ -76,4 +77,22 @@ status = "S(\\d+)"
     expect(fatal(eq(p.what, run_kind::run))) << p.message;
     expect(p.options.image.empty()) << "the profile's image is the runner's to take";
     expect(contains(p.options.prof.vm.image, "disk.qcow2"));
+}};
+
+UTest statuses{"the program returns the run's status, 0 for help and the version, 2 for a wrong line", [] {
+    int runs = 0;
+    auto execute = [&runs](const dirun::runner::options& o) {
+        ++runs;
+        return o.command.size() == 2 ? 42 : 1;
+    };
+    auto status = [&](std::vector<std::string> words) {
+        words.insert(words.begin(), "dirun");
+        return dirun::cli::run(words, execute);
+    };
+    expect(eq(status({"--image", "a", "--", "x", "y"}), 42));
+    expect(eq(runs, 1));
+    expect(eq(status({"--image", "a", "--nope", "--", "x"}), 2)) << "an unknown option";
+    expect(eq(status({"--image", "a"}), 2)) << "no command";
+    expect(eq(status({"--version"}), 0));
+    expect(eq(runs, 1)) << "a wrong line and the version run nothing";
 }};

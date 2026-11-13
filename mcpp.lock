@@ -13,9 +13,9 @@ hash    = "fnv1a:1420a0be548b3b22"
 
 [package."mcpplibs.cmdline"]
 namespace = "mcpplibs"
-version = "0.0.3"
-source  = "index+mcpplibs@0.0.3"
-hash    = "fnv1a:aad61199abc2c304"
+version = "0.0.4"
+source  = "index+mcpplibs@0.0.4"
+hash    = "fnv1a:aad61099abc2c151"
 
 [package."mcpplibs.mtest"]
 namespace = "mcpplibs"

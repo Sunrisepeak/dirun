@@ -13,8 +13,9 @@ import dirun.runner;
 
 export namespace dirun::cli {
 
-inline constexpr std::string_view version = "0.3.0";
+inline constexpr std::string_view version = "0.3.1";
 
+// What a command line describes, without running it.
 struct parsed {
     enum class kind { run, done, error } what = kind::error;
     runner::options options;
@@ -22,6 +23,11 @@ struct parsed {
 };
 
 parsed parse(std::span<const std::string> args);
+
+// The program: the command line is parsed and the run it describes is given to `execute`, whose
+// result is the status. Help and the version return 0; a wrong command line is reported on
+// standard error and returns 2 (docs/contract.md).
+int run(std::span<const std::string> args, const std::function<int(const runner::options&)>& execute);
 
 }  // namespace dirun::cli
 
@@ -77,24 +83,11 @@ std::optional<double> number(const std::string& text) {
     return v;
 }
 
-}  // namespace
-
-parsed parse(std::span<const std::string> args) {
-    parsed out;
-    auto a = app().parse_from(args);
-    if (!a) {
-        if (a.error().is_error())
-            out.message = a.error().message;
-        else
-            out.what = parsed::kind::done;
-        return out;
-    }
-    auto& o = out.options;
-    auto fail = [&](std::string m) {
-        out.what = parsed::kind::error;
-        out.message = std::move(m);
-        return out;
-    };
+// The run a parsed command line describes, or what is wrong with it.
+std::expected<runner::options, std::string> options_of(const cmdline::ParsedArgs& given) {
+    const auto* a = &given;
+    runner::options o;
+    auto fail = [](std::string m) { return std::unexpected(std::move(m)); };
     o.image = a->value("image").value_or("");
     o.payload = a->value("payload").value_or("");
     if (!o.image.empty() && !o.payload.empty())
@@ -201,8 +194,43 @@ parsed parse(std::span<const std::string> args) {
         return fail("name an image with --image (or a profile whose [machine] states one), or a payload with --payload");
     if (o.payload.empty() && o.command.empty())
         return fail("name the command to run after `--'");
+    return o;
+}
+
+}  // namespace
+
+parsed parse(std::span<const std::string> args) {
+    parsed out;
+    auto a = app().parse_from(args);
+    if (!a) {
+        if (a.error().is_error())
+            out.message = a.error().message;
+        else
+            out.what = parsed::kind::done;
+        return out;
+    }
+    auto o = options_of(*a);
+    if (!o) {
+        out.message = std::move(o.error());
+        return out;
+    }
     out.what = parsed::kind::run;
+    out.options = std::move(*o);
     return out;
+}
+
+int run(std::span<const std::string> args, const std::function<int(const runner::options&)>& execute) {
+    auto a = app();
+    (void)a.action([&execute](const cmdline::ParsedArgs& p) -> int {
+        auto o = options_of(p);
+        if (!o) {
+            std::println(std::cerr, "dirun: {}", o.error());
+            std::println(std::cerr, "dirun: see 'dirun --help'");
+            return 2;
+        }
+        return execute(*o);
+    });
+    return a.run(args);
 }
 
 }  // namespace dirun::cli

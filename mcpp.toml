@@ -17,6 +17,6 @@ main = "src/main.cpp"
 
 [dependencies]
 mcpplibs.os         = "^0.4.4"
-mcpplibs.cmdline    = "0.0.3"
+mcpplibs.cmdline    = "0.0.4"
 mcpplibs.mtest      = "^0.7.1"
 marzer.tomlplusplus = "3.4.0"
