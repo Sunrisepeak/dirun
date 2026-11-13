@@ -29,6 +29,7 @@ struct machine {
     std::vector<std::string> args; // further qemu words, {var} expanded
     std::string image;             // the disk booted when --image is not given; a relative name is
                                    // the profile file's directory's (an image ships its profile)
+    std::string format;            // the image's format; empty: the emulator reads it
 };
 
 struct command {
@@ -185,7 +186,7 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
     p.origin = o;
     p.name = t["name"].value_or(std::string("unnamed"));
     if (auto m = t["machine"].as_table()) {
-        if (auto k = known(*m, o + " [machine]", {"arch", "type", "cpu", "memory", "smp", "args", "image"}); !k)
+        if (auto k = known(*m, o + " [machine]", {"arch", "type", "cpu", "memory", "smp", "args", "image", "format"}); !k)
             return std::unexpected(k.error());
         p.vm.arch = (*m)["arch"].value_or(p.vm.arch);
         p.vm.type = (*m)["type"].value_or(std::string());
@@ -194,6 +195,7 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
         p.vm.smp = int((*m)["smp"].value_or(std::int64_t(p.vm.smp)));
         p.vm.args = strings((*m)["args"]);
         p.vm.image = (*m)["image"].value_or(std::string());
+        p.vm.format = (*m)["format"].value_or(std::string());
     }
     if (auto b = t["boot"].as_array())
         for (const auto& n : *b) {

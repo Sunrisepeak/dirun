@@ -29,7 +29,7 @@ over a pipe, the same on Linux, macOS and Windows hosts.
 
 - [docs/contract.md](docs/contract.md) -- the command line, the marker protocol, the exit statuses
 - [docs/profiles.md](docs/profiles.md) -- the profile format, with the guest and payload forms
-- Requires `qemu-system-<arch>` and `qemu-img`
+- Requires `qemu-system-<arch>` (or the emulator `--emulator` names), and nothing else of the host's
 
 ```sh
 mcpp build && mcpp test        # DIRUN_TEST_IMAGE=<img> also boots one for real
