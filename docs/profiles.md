@@ -61,10 +61,33 @@ machine = true               # false: the emulator is not QEMU and is given only
 # files       = { "RUN.BAT" = "PROG.EXE {args} > OUT.TXT" }   # templates written into {dir}
 # status-file = "RC.TXT"     # status = "file": the number a launcher wrote
 # output-file = "OUT.TXT"    # the program's output, read from {dir}
+# stderr-file = "ERR.TXT"    # its standard error, read from {dir} and written to dirun's (0.4.0)
 # env         = { SDL_VIDEODRIVER = "dummy" }                 # the emulator's environment
 # emulator    = "bin/dosbox" # when --emulator is not given; relative: beside this file
 # beside      = ["CWSDPMI.EXE"]   # files beside this file, delivered beside the payload
 ```
+
+A guest reached by commands (0.4.0) has `[reach]` in place of `[machine]`, `[[boot]]` and `[files]`,
+and `[start]` when this program starts its machine. Its `[command]` is the guest's command line, as
+for a console:
+
+```toml
+[reach]
+shell = ["{adb}", "-s", "{serial}", "shell", "{line}"]          # runs one command line; {line}
+push  = ["{adb}", "-s", "{serial}", "push", "{host}", "{guest}"]  # delivers one file
+at    = "/data/local/tmp/dirun"                                  # where delivered files are placed
+
+[start]                      # omitted: the guest is already running (a remote host)
+command = ["{emulator}", "-avd", "{avd}", "-no-window", "-no-audio", "-no-snapshot-save"]
+ready   = ["{adb}", "-s", "{serial}", "shell", "getprop sys.boot_completed | grep -q 1"]
+ready-timeout = 600          # seconds; `ready' is run once a second until it succeeds
+stop    = ["{adb}", "-s", "{serial}", "emu", "kill"]   # omitted: the started command is ended
+```
+
+The two parts are independent. A machine's lifecycle (`[start]`) may be absent; the way into the
+guest (`[reach]`) is always stated. A virtual machine with a serial console, an emulated device
+behind a bridge and a running host behind a remote shell are three combinations of the two
+([examples](examples)).
 
 An emulator of another system's interface rather than of a machine --- DOSBox, which runs a DOS
 program in a directory it mounts as `C:` --- is a payload profile with `machine = false`: the

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 -- 2026-11-15
+
+- **A guest reached by commands.** A profile's `[reach]` states how a guest that this program does
+  not drive through a console is reached: `shell` runs one command line there, `push` delivers one
+  file, `at` is where delivered files are placed. `[start]`, when present, starts the guest's
+  machine (`command`), waits until it can be reached (`ready`, within `ready-timeout`) and ends it
+  (`stop`) however the run ends. The guest's command line is the profile's `[command]`, so the
+  output and status are read as for a console. An emulated device behind a bridge and a running
+  host behind a remote shell are two profiles of this one form (docs/examples).
+- **Runtime files.** The files a build tool lists beside a program in `MCPP_RUNTIME_FILES`
+  (`<destination><TAB><source>`, relative to the program's directory) are delivered where the
+  program goes: beside its copy on the files disk, beside the payload, or under `[reach] at`. A
+  destination above the program's directory is reported, not delivered.
+- **`[payload] stderr-file`.** The program's standard error, which a launcher wrote to a file of
+  `{dir}`, is written to this program's standard error, apart from the output.
+
 ## 0.3.2 -- 2026-11-13
 
 - **`{profile-dir}` is the directory of the profile's file.** A profile names a file shipped beside

@@ -7,13 +7,17 @@ dirun [--image IMG] [--profile FILE] [--var NAME=VALUE]... [MACHINE] [--env NAME
       [--pass NAME|PREFIX*]... [--file HOST=GUEST]... [--timeout SEC] [--trace FILE] -- COMMAND...
 dirun --payload FILE [--profile FILE] [PAYLOAD] [--var NAME=VALUE]... [MACHINE] [--file HOST=GUEST]...
       [--timeout SEC] [--trace FILE] [-- ARGS...]
+dirun --profile FILE [--var NAME=VALUE]... [--env NAME=VALUE]... [--pass NAME|PREFIX*]...
+      [--file HOST=GUEST]... [--timeout SEC] -- COMMAND...        (a profile with [reach])
 
 PAYLOAD: [--emulator-arg WORD]... [--place PATH] [--status exit|debug-exit|marker] [--marker REGEX] [--after REGEX]
 
 MACHINE: [--arch ARCH] [--emulator PROGRAM] [--machine M] [--cpu C] [--memory MiB] [--smp N] [--accel auto|kvm|tcg]
 ```
 
-Exactly one of `--image` and `--payload` is given. A machine option overrides the profile's
+At most one of `--image` and `--payload` is given. Without either, the image is the profile's
+`[machine] image`, or the guest is reached by commands when the profile has `[reach]` (reached
+mode, below). A machine option overrides the profile's
 `[machine]`. `--emulator` names the emulator; without it, `qemu-system-ARCH` is found on `PATH` (a
 runner that installs its emulator as a package names the package's program). `--accel auto` asks for the host's accelerator (kvm, hvf, whpx) and falls back to tcg.
 `--trace` writes the emulator's command line and the console's transcript, with what was sent
@@ -74,7 +78,42 @@ status is the emulator's exit status (`exit`), that status as a debug-exit devic
 `(s - 1) / 2` (`debug-exit`), the first group of a pattern on the console (`marker`), or the number
 in `[payload] status-file` that a launcher in `{dir}` wrote (`file`: an emulator whose own status
 is not the program's). The output is the console's, after the first match of `[payload] after`
-when the profile states one, or the contents of `[payload] output-file`.
+when the profile states one, or the contents of `[payload] output-file`. The contents of
+`[payload] stderr-file`, when the profile states one, are written to this program's standard error
+(0.4.0): an emulator whose console carries only the program's standard output (a DOS machine) has a
+launcher redirect the standard error to a file of its own.
+
+## Reached mode
+
+A guest that this program does not boot and drive through a console --- a device behind a bridge
+(`adb`), a host behind a remote shell (`ssh`) --- is reached by the commands of the profile's
+`[reach]` (0.4.0). The guest's command line is the same `[command]` line a console is given;
+only the way it arrives differs.
+
+1. The machine, when the profile has `[start]`: its `command` is started, its outputs discarded,
+   and its `ready` command is run once a second until it succeeds, within `ready-timeout` seconds
+   and the run's limit. However the run ends, `stop` is run when the profile states it, and what
+   remains of the started command is ended. A profile without `[start]` reaches a guest that is
+   already running.
+2. Each `[command] prepare` line is run by `[reach] shell` (`{line}` is the line).
+3. The files --- each `--file`, a program of this machine that `COMMAND` names first (run from
+   its copy), and its runtime files (below) --- are delivered one by one by `[reach] push`
+   (`{host}` is the file here, `{guest}` its name under `[reach] at`).
+4. The command line is run by `[reach] shell`. The output and status are read from what that
+   command wrote to its standard output, between the begin marker and the status marker, as in
+   guest mode; what it wrote to its standard error is written to this program's. A command that
+   wrote no status marker did not reach the guest: 125.
+
+## Runtime files
+
+A build tool that starts this program as a runner may list the files a program reads from its own
+directory in a file named by `MCPP_RUNTIME_FILES`: one line per file,
+`<destination><TAB><source>`, the destination relative to the program's directory with `/`
+separators (0.4.0). They go where the program goes: on the files disk beside the program's copy
+(guest mode), beside the payload at `[payload] place` (payload mode), or under `[reach] at`
+beside the program (reached mode). A destination that climbs above the program's directory
+(`../`) has no place there and is reported on standard error, not delivered. A run that delivers
+no program of this machine delivers no runtime files.
 
 ## Exit statuses
 
@@ -83,7 +122,7 @@ when the profile states one, or the contents of `[payload] output-file`.
 | 0-255 | the command's or the payload's own status |
 | 2 | the command line is wrong |
 | 124 | the time limit expired first |
-| 125 | the console ended, or a pattern never came |
+| 125 | the console ended, a pattern never came, or a reached guest wrote no status |
 | 126 | a prerequisite is unusable |
 | 128 + n | ended by signal n; the emulator is ended and the temporary files removed |
 

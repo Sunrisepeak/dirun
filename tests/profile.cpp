@@ -95,3 +95,19 @@ env      = { SDL_VIDEODRIVER = "dummy" }
     expect(eq(std::filesystem::path(p->boot_payload->beside.front()), std::filesystem::absolute(dir) / "CWSDPMI.EXE"));
     expect(eq(p->boot_payload->env.at("SDL_VIDEODRIVER"), std::string("dummy")));
 }};
+
+UTest examples{"each example profile of the documentation is a profile", [] {
+    const auto dir = std::filesystem::path(std::source_location::current().file_name()).parent_path().parent_path() /
+                     "docs" / "examples";
+    int seen = 0;
+    for (const auto& e : std::filesystem::directory_iterator(dir)) {
+        if (e.path().extension() != ".toml")
+            continue;
+        ++seen;
+        auto p = dirun::profile::load(e.path());
+        expect(p.has_value()) << e.path().generic_string() << ": " << (p ? "" : p.error());
+        if (p)
+            expect(p->reached.has_value()) << e.path().generic_string() << " states how its guest is reached";
+    }
+    expect(eq(seen, 2));
+}};

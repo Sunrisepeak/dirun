@@ -1,5 +1,5 @@
-// The runner: QEMU's command line, the image booted in snapshot mode, the files disk, the guest and payload
-// modes, and the exit codes (docs/contract.md):
+// The runner: QEMU's command line, the image booted in snapshot mode, the files disk, the guest,
+// payload and reached modes, and the exit codes (docs/contract.md):
 //
 //     0-255  the program's own status (guest), or the payload's (payload), passed through
 //     124    the run's time limit expired first
@@ -50,6 +50,9 @@ struct options {
     std::vector<std::string> command;          // guest mode: the command's words
     std::vector<std::pair<std::string, std::string>> env;
     std::vector<file_delivery> files;
+    // The files the program reads from its own directory (MCPP_RUNTIME_FILES of the build tool that
+    // started this one, 0.4.0): `guest' is the name relative to the program's directory.
+    std::vector<file_delivery> runtime_files;
     // The test protocol of the program that started this one (MTEST_PROTOCOL and MTEST_REPORT set):
     // the command speaks it in the guest, and its events come back to `report'.
     struct test_protocol {
@@ -71,6 +74,7 @@ struct options {
 struct result {
     int status = 0;
     std::string output;
+    std::string error_output;  // the program's standard error, where the guest keeps it apart (0.4.0)
     int signal = 0;  // the run was ended by this signal; status is 128 + it
 };
 
@@ -126,6 +130,24 @@ private:
 };
 
 std::string str(const std::filesystem::path& p) { return os::fs::utf8(p); }
+
+// The runtime files beside a program whose guest name is `program': each destination is relative
+// to the program's directory. One that climbs above it has no place where the program was put, and
+// is reported rather than dropped in silence.
+std::vector<file_delivery> beside_program(const options& o, const std::string& program) {
+    std::vector<file_delivery> out;
+    const auto slash = program.rfind('/');
+    const std::string dir = slash == std::string::npos ? std::string() : program.substr(0, slash + 1);
+    for (const auto& f : o.runtime_files) {
+        if (f.guest.starts_with("../") || f.guest.starts_with('/')) {
+            std::println(std::cerr, "dirun: warning: {} is not delivered: its place ({}) is outside the "
+                                    "program's directory", f.host, f.guest);
+            continue;
+        }
+        out.push_back({f.host, dir + f.guest});
+    }
+    return out;
+}
 
 std::string expanded(const std::string& text, const std::map<std::string, std::string>& vars) {
     auto e = profile::expand(text, vars);
@@ -250,20 +272,26 @@ struct delivery {
     std::optional<std::string> report;  // the host's MTEST_REPORT the guest's events are appended to
 };
 
-delivery deliver(const options& o) {
+// `at': where the guest finds the delivered files ([files] at for a console's guest, [reach] at
+// for a reached one).
+delivery deliver_to(const options& o, const std::string& at) {
     const auto& p = o.prof;
     delivery d{o.command, o.env, o.files, std::nullopt};
     auto offered = [&](const std::string& host, const std::string& name) {
-        if (p.files_at.empty())
-            throw error("the profile " + p.origin + " states no [files] at: a file of this machine has no place "
-                        "in the guest", exit_unusable);
+        if (at.empty())
+            throw error("the profile " + p.origin + " states no place for files ([files] at, [reach] at): a "
+                        "file of this machine has no place in the guest", exit_unusable);
         d.files.push_back({host, name});
-        return p.files_at + "/" + name;
+        return at + "/" + name;
     };
     // A program offered from here is run from its copy; a name that is no file here is the guest's.
     if (std::error_code ec; !d.command.empty() &&
-                            std::filesystem::is_regular_file(os::fs::from_utf8(d.command.front()), ec))
-        d.command.front() = offered(d.command.front(), os::fs::utf8(os::fs::from_utf8(d.command.front()).filename()));
+                            std::filesystem::is_regular_file(os::fs::from_utf8(d.command.front()), ec)) {
+        const auto name = os::fs::utf8(os::fs::from_utf8(d.command.front()).filename());
+        d.command.front() = offered(d.command.front(), name);
+        for (const auto& f : beside_program(o, name))
+            (void)offered(f.host, f.guest);
+    }
     if (o.protocol && p.events) {
         const auto& t = *o.protocol;
         d.report = t.report;
@@ -286,7 +314,7 @@ result run_guest(const options& o, const clock& c) {
         throw error("the image does not exist: " + image, exit_unusable, "pass an existing disk image to --image");
     if (p.cmd.line.empty())
         throw error("the profile " + p.origin + " has no [command]: it cannot run a command", exit_unusable);
-    auto d = deliver(o);
+    auto d = deliver_to(o, p.files_at);
     workdir dir(o.workdir);
     auto line = protocol::wrap(p.cmd, d.command, d.env);
     if (!line)
@@ -414,6 +442,12 @@ result run_payload(const options& o, const clock& c) {
         put(os::fs::from_utf8(o.payload), pl.place);
     for (const auto& f : o.files)
         put(os::fs::from_utf8(f.host), f.guest);
+    if (!pl.place.empty())
+        for (const auto& f : beside_program(o, pl.place))
+            put(os::fs::from_utf8(f.host), f.guest);
+    else if (!o.runtime_files.empty())
+        std::println(std::cerr, "dirun: warning: the profile places no payload in a directory ([payload] "
+                                "place), so its {} runtime file(s) are not delivered", o.runtime_files.size());
     for (const auto& f : pl.beside)
         put(os::fs::from_utf8(f), os::fs::utf8(os::fs::from_utf8(f).filename()));
     for (const auto& [name, text] : pl.files)
@@ -476,6 +510,15 @@ result run_payload(const options& o, const clock& c) {
         text << in.rdbuf();
         out = text.str();
     }
+    std::string err;
+    if (!pl.stderr_file.empty()) {
+        // An emulator that merges nothing of the program's standard error into its own output (a
+        // DOS machine's command interpreter has no `2>' of its own): the launcher wrote it to a file.
+        std::ifstream in(root / os::fs::from_utf8(pl.stderr_file), std::ios::binary);
+        std::stringstream text;
+        text << in.rdbuf();
+        err = protocol::normalize(text.str());
+    }
     out = protocol::normalize(out);
     if (!pl.after.empty()) {
         // THE END OF THE BOOT, AND THE PROOF THAT THERE WAS ONE. An emulator that could not start
@@ -491,7 +534,141 @@ result run_payload(const options& o, const clock& c) {
                         exit_no_console, "check the emulator's words and the firmware's path");
         out = out.substr(std::size_t(m.position(0) + m.length(0)));
     }
-    return {status & 0xFF, out};
+    return {status & 0xFF, out, err};
+}
+
+std::vector<std::string> expand_all(const std::vector<std::string>& words,
+                                    const std::map<std::string, std::string>& vars) {
+    std::vector<std::string> out;
+    for (const auto& w : words)
+        out.push_back(expanded(w, vars));
+    return out;
+}
+
+// A command of the profile, its templates expanded, run to its end within the run's limit.
+e2e::outcome command_of(const std::vector<std::string>& words, const std::map<std::string, std::string>& vars,
+                        double seconds, const clock& c, const char* what) {
+    if (g_signal)
+        throw interrupted{int(g_signal)};
+    e2e::command cmd;
+    cmd.argv = expand_all(words, vars);
+    const double bound = std::max(0.0, std::min(seconds, c.left()));
+    cmd.timeout = std::chrono::milliseconds{static_cast<long long>(bound * 1000)};
+    auto r = e2e::run(cmd);
+    if (!r.started)
+        throw error(std::format("{} did not start ({}): {}", cmd.argv.front(), what, r.err), exit_unusable,
+                    "install the program the profile names, or give its path with --var");
+    if (r.timed_out)
+        throw error(std::format("the time limit expired {}", what), exit_timeout, "raise --timeout");
+    if (g_signal)
+        throw interrupted{int(g_signal)};
+    return r;
+}
+
+// The machine of a reached guest, for the length of the run: started, awaited until it can be
+// reached, and ended however the run ends.
+class machine_lifecycle {
+public:
+    machine_lifecycle(const options& o, const clock& c) : o_(o) {
+        if (!o.prof.lifecycle)
+            return;
+        const auto& st = *o.prof.lifecycle;
+        if (!st.command.empty()) {
+            // Its outputs go to the null device: nothing reads them for the length of the run, and
+            // a pipe nobody reads would stop the machine once it filled.
+            os::process::spawn_options so;
+            const auto words = expand_all(st.command, o.vars);
+            so.program = os::fs::from_utf8(words.front());
+            so.args.assign(words.begin() + 1, words.end());
+            so.in = so.out = so.err = os::process::stdio::null;
+            so.own_unit = true;
+            so.bound_lifetime = true;
+            auto started = os::process::process::spawn(so);
+            if (!started)
+                throw error(std::format("{} did not start: {}", words.front(), started.error().message()),
+                            exit_unusable, "install the machine the profile's [start] command names");
+            machine_ = std::move(*started);
+        }
+        if (st.ready.empty())
+            return;
+        // UNTIL IT SUCCEEDS: a device bridge answers once the machine has booted, and a machine that
+        // ended first never will.
+        const auto end = std::chrono::steady_clock::now() + std::chrono::duration<double>(st.ready_timeout);
+        for (;;) {
+            auto r = command_of(st.ready, o.vars, 60, c, "while the machine started");
+            if (r.status == 0)
+                return;
+            if (machine_.valid())
+                if (auto ended = machine_.try_wait(); ended && *ended)
+                    throw error(std::format("the machine ended with status {} while it started",
+                                            (*ended)->shell_code()),
+                                exit_no_console, "check the profile's [start] command");
+            if (std::chrono::steady_clock::now() >= end || c.left() <= 0)
+                throw error(std::format("the machine was not ready within {} seconds", st.ready_timeout),
+                            c.left() <= 0 ? exit_timeout : exit_no_console, "raise [start] ready-timeout or --timeout");
+            std::this_thread::sleep_for(std::chrono::seconds{1});
+        }
+    }
+    ~machine_lifecycle() {
+        // ASKED FIRST, THEN ENDED: a machine's own way down (an emulator's console command) lets it
+        // release what it holds; whatever is left of the started program ends with its unit.
+        if (o_.prof.lifecycle && !o_.prof.lifecycle->stop.empty()) {
+            e2e::command stop;
+            for (const auto& w : o_.prof.lifecycle->stop)
+                if (auto e = profile::expand(w, o_.vars))
+                    stop.argv.push_back(*e);
+            stop.timeout = std::chrono::seconds{60};
+            (void)e2e::run(stop);
+            if (machine_.valid())
+                (void)machine_.wait_for(std::chrono::seconds{30});
+        }
+        if (machine_.valid())
+            machine_.end_unit();
+    }
+    machine_lifecycle(const machine_lifecycle&) = delete;
+    machine_lifecycle& operator=(const machine_lifecycle&) = delete;
+private:
+    const options& o_;
+    os::process::process machine_;
+};
+
+// A GUEST REACHED BY COMMANDS (0.4.0): the files are delivered by the profile's `push', the
+// command line --- the same [command] line a console is given --- by its `shell', and the output
+// and status are read from what that command wrote, between the same markers.
+result run_reached(const options& o, const clock& c) {
+    const auto& p = o.prof;
+    const auto& re = *p.reached;
+    machine_lifecycle machine(o, c);
+    auto d = deliver_to(o, re.at);
+    auto vars = o.vars;
+    for (const auto& prep : p.cmd.prepare) {
+        vars["line"] = expanded(prep, o.vars);
+        (void)command_of(re.shell, vars, 60, c, "while a prepared line ran");
+    }
+    for (const auto& f : d.files) {
+        if (re.push.empty())
+            throw error("the profile " + p.origin + " states no [reach] push: a file of this machine has no way "
+                        "into the guest", exit_unusable);
+        vars["host"] = str(std::filesystem::absolute(os::fs::from_utf8(f.host)));
+        vars["guest"] = re.at + "/" + f.guest;
+        auto r = command_of(re.push, vars, 300, c, "while a file was delivered");
+        if (r.status != 0)
+            throw error(std::format("{} was not delivered (status {}): {}{}", f.host, r.status, r.out, r.err),
+                        exit_unusable, "check the profile's [reach] push and the guest's `at'");
+    }
+    auto line = protocol::wrap(p.cmd, d.command, d.env);
+    if (!line)
+        throw error("the profile: " + line.error(), exit_unusable);
+    vars["line"] = *line;
+    auto r = command_of(re.shell, vars, c.left(), c, "while the command ran");
+    std::smatch m;
+    const std::regex status_rx(p.cmd.status, std::regex::ECMAScript);
+    if (!std::regex_search(r.out, m, status_rx))
+        throw error(std::format("the guest's command wrote no status (the shell's own status {}); it wrote:\n{}{}",
+                                r.status, r.out.substr(r.out.size() > 800 ? r.out.size() - 800 : 0), r.err),
+                    exit_no_console, "check that the guest can be reached and the profile's [command] line");
+    auto split = protocol::split(r.out, p.cmd);
+    return {split.status & 0xFF, split.output, protocol::normalize(r.err)};
 }
 
 }  // namespace
@@ -519,9 +696,13 @@ result run(const options& o) {
     signals guard;
     const clock c{.limit = o.timeout};
     try {
-        return o.payload.empty() ? run_guest(o, c) : run_payload(o, c);
+        if (!o.payload.empty())
+            return run_payload(o, c);
+        if (o.image.empty() && o.prof.vm.image.empty() && o.prof.reached)
+            return run_reached(o, c);
+        return run_guest(o, c);
     } catch (const interrupted& i) {
-        return {128 + i.signal, {}, i.signal};
+        return {128 + i.signal, {}, {}, i.signal};
     }
 }
 

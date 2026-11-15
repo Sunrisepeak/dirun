@@ -62,6 +62,27 @@ struct payload {
     std::string emulator;           // the emulator when --emulator is not given; a relative name is
                                     // the profile file's directory's (a package ships its profile)
     std::vector<std::string> beside;  // files delivered beside the payload, from the profile's directory
+    std::string stderr_file;        // a file in {dir} holding the program's standard error (0.4.0)
+};
+
+// A guest reached by commands rather than by a console this program drives (0.4.0): a device
+// bridge (adb), a remote shell (ssh). `shell' runs one command line there, `push' delivers one
+// file, `at' is where delivered files are placed. The guest's own command line is the profile's
+// [command], as for a console.
+struct reach {
+    std::vector<std::string> shell;  // {line}: the command line
+    std::vector<std::string> push;   // {host}: the file here; {guest}: its name there
+    std::string at;
+};
+
+// How the machine a reached guest runs on starts and ends (0.4.0); absent: it is already running
+// (a remote host). `command' runs for the length of the run; `ready' is run until it succeeds;
+// `stop' ends the machine, else the started program is ended.
+struct start {
+    std::vector<std::string> command;
+    std::vector<std::string> ready;
+    double ready_timeout = 300;      // seconds, within the run's own limit
+    std::vector<std::string> stop;
 };
 
 // The test protocol's events across the machine's boundary (docs/contract.md, "The test
@@ -80,6 +101,8 @@ struct profile {
     std::string files_at;            // where the mount lines put the files disk in the guest
     std::optional<relay> events;
     std::optional<payload> boot_payload;
+    std::optional<reach> reached;
+    std::optional<start> lifecycle;
     std::string origin;              // the file it came from, or "built-in"
     std::string dir;                 // the directory of that file, `{profile-dir}'; empty when built in
 };
@@ -181,7 +204,7 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
         return std::unexpected(std::format("{}: {}", origin, e.description()));
     }
     const std::string o(origin);
-    if (auto k = known(t, o, {"name", "machine", "boot", "command", "files", "relay", "payload"}); !k)
+    if (auto k = known(t, o, {"name", "machine", "boot", "command", "files", "relay", "payload", "reach", "start"}); !k)
         return std::unexpected(k.error());
     profile p;
     p.origin = o;
@@ -257,7 +280,7 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
     if (auto y = t["payload"].as_table()) {
         if (auto k = known(*y, o + " [payload]", {"args", "machine", "place", "files", "status", "marker",
                                                    "status-file", "output-file", "after", "env", "emulator",
-                                                   "beside"});
+                                                   "beside", "stderr-file"});
             !k)
             return std::unexpected(k.error());
         payload pl;
@@ -281,6 +304,7 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
         pl.marker = (*y)["marker"].value_or(std::string());
         pl.status_file = (*y)["status-file"].value_or(std::string());
         pl.output_file = (*y)["output-file"].value_or(std::string());
+        pl.stderr_file = (*y)["stderr-file"].value_or(std::string());
         pl.after = (*y)["after"].value_or(std::string());
         if (pl.status != "exit" && pl.status != "debug-exit" && pl.status != "marker" && pl.status != "file")
             return std::unexpected(std::format("{}: [payload] status is exit, debug-exit, marker or file, not `{}'", o, pl.status));
@@ -291,6 +315,37 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
         if (!pl.after.empty() && !valid_regex(pl.after))
             return std::unexpected(o + ": [payload] `after' is not a valid pattern");
         p.boot_payload = std::move(pl);
+    }
+    if (auto r = t["reach"].as_table()) {
+        if (auto k = known(*r, o + " [reach]", {"shell", "push", "at"}); !k)
+            return std::unexpected(k.error());
+        reach re;
+        re.shell = strings((*r)["shell"]);
+        re.push = strings((*r)["push"]);
+        re.at = (*r)["at"].value_or(std::string());
+        if (re.shell.empty())
+            return std::unexpected(o + ": [reach] needs `shell', the command that runs a line in the guest");
+        if (!re.push.empty() && re.at.empty())
+            return std::unexpected(o + ": [reach] `push' needs `at', where delivered files are placed");
+        if (p.cmd.line.empty())
+            return std::unexpected(o + ": [reach] needs [command], the guest's own command line");
+        p.reached = std::move(re);
+    }
+    if (auto st = t["start"].as_table()) {
+        if (auto k = known(*st, o + " [start]", {"command", "ready", "ready-timeout", "stop"}); !k)
+            return std::unexpected(k.error());
+        start sm;
+        sm.command = strings((*st)["command"]);
+        sm.ready = strings((*st)["ready"]);
+        sm.stop = strings((*st)["stop"]);
+        sm.ready_timeout = (*st)["ready-timeout"].value_or(300.0);
+        if (auto i = (*st)["ready-timeout"].value<std::int64_t>())
+            sm.ready_timeout = double(*i);
+        if (!p.reached)
+            return std::unexpected(o + ": [start] belongs to a guest reached by commands: it needs [reach]");
+        if (sm.command.empty() && sm.ready.empty())
+            return std::unexpected(o + ": [start] needs `command', `ready', or both");
+        p.lifecycle = std::move(sm);
     }
     return p;
 }

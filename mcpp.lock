@@ -19,15 +19,15 @@ hash    = "fnv1a:aad61099abc2c151"
 
 [package."mcpplibs.mtest"]
 namespace = "mcpplibs"
-version = "0.7.1"
-source  = "index+mcpplibs@0.7.1"
-hash    = "fnv1a:2af53286d2921d56"
+version = "0.7.2"
+source  = "index+mcpplibs@0.7.2"
+hash    = "fnv1a:2af53186d2921ba3"
 
 [package."openkal"]
 namespace = "mcpplibs"
-version = "0.25.1"
-source  = "index+mcpplibs@0.25.1"
-hash    = "fnv1a:68ef4b0777428faf"
+version = "0.25.3"
+source  = "index+mcpplibs@0.25.3"
+hash    = "fnv1a:68ef4d0777429315"
 
 [package."openkal-linux"]
 namespace = "mcpplibs"
