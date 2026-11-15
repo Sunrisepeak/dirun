@@ -117,6 +117,10 @@ jobs:
           tar -xzf "dist/$package.tar.gz" -C unpacked
           said=$("unpacked/$package/bin/dirun" --version)
           [ "$said" = "$version" ] || { echo "::error::the packaged program says '$said', the manifest $version"; exit 1; }
+          # Started through a path with `//` and `..`, as a user's shell may name it: the launcher
+          # hands okrun the image by that path, which okrun normalises (N12).
+          said=$("unpacked//$package/bin/../bin/dirun" --version)
+          [ "$said" = "$version" ] || { echo "::error::started through '//' and '..', the package says '$said'"; exit 1; }
           python3 - "unpacked/$package/mcpp-package.json" <<'PY'
           import json, sys
           d = json.load(open(sys.argv[1]))
