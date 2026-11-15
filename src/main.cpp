@@ -14,6 +14,9 @@ int execute(const dirun::runner::options& options) {
         if (!r.output.empty() && !r.output.ends_with('\n'))
             std::cout << '\n';
         std::cout.flush();
+        std::cerr << r.error_output;
+        if (!r.error_output.empty() && !r.error_output.ends_with('\n'))
+            std::cerr << '\n';
         if (r.signal)
             std::println(std::cerr, "dirun: ended by signal {}; the emulator was ended", r.signal);
         return r.status;

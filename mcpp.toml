@@ -1,6 +1,6 @@
 [package]
 name        = "dirun"
-version     = "0.3.2"
+version     = "0.4.0"
 description = "Run one command inside a booted disk image, or boot a payload, and return its output and exit code"
 license     = "Apache-2.0"
 repo        = "https://github.com/Sunrisepeak/dirun"
@@ -14,6 +14,12 @@ sources = ["src/*.cppm"]
 [targets.dirun]
 kind = "bin"
 main = "src/main.cpp"
+
+# The released package's ok images run through the openkal platform's okrun. 0.28.1 carries
+# openkal-tools 0.6.4, whose okrun normalises the image's path (`//`, `..`); the version the
+# engine names by default carried an okrun that refused such a path (design 2026-11-15 N12).
+[target.'cfg(os = "openkal")']
+platform = "openkal-platform@0.28.1"
 
 [dependencies]
 mcpplibs.os         = "^0.4.4"

@@ -3,6 +3,8 @@
 //     dirun [--image IMG] [--profile FILE] [--var K=V]... [machine] [--env K=V]... [--pass NAME|P*]...
 //           [--file H=G]... -- COMMAND...
 //     dirun --payload F [--profile FILE] [payload] [--var K=V]... [machine] [--file H=G]... [-- ARGS...]
+//     dirun --profile FILE [--var K=V]... [--env K=V]... [--pass NAME|P*]... [--file H=G]... -- COMMAND...
+//           (a profile with [reach]: a guest reached by commands)
 export module dirun.cli;
 
 import std;
@@ -13,7 +15,7 @@ import dirun.runner;
 
 export namespace dirun::cli {
 
-inline constexpr std::string_view version = "0.3.2";
+inline constexpr std::string_view version = "0.4.0";
 
 // What a command line describes, without running it.
 struct parsed {
@@ -41,8 +43,8 @@ namespace {
 cmdline::App app() {
     cmdline::App a("dirun");
     (void)a.version(std::string(version))
-        .description("Run one command inside a booted disk image, or boot a payload, and return its "
-                     "output and exit code.");
+        .description("Run one command inside a booted disk image or a guest reached by commands, or boot "
+                     "a payload, and return its output and exit code.");
     a.option("image").takes_value().value_name("IMG").help("the disk image (never written: a temporary overlay is booted)")
         .option("payload").takes_value().value_name("FILE").help("boot FILE itself (a firmware application, a bare-metal program); needs a profile with [payload]")
         .option("profile").takes_value().value_name("FILE").help("how the image boots and runs a command, or how the payload boots (default: the built-in posix-login)")
@@ -193,8 +195,27 @@ std::expected<runner::options, std::string> options_of(const cmdline::ParsedArgs
         else return fail(std::format("--accel is auto, kvm or tcg, not `{}'", *v));
     }
     o.command = a->positionals;
-    if (o.payload.empty() && o.image.empty() && o.prof.vm.image.empty())
-        return fail("name an image with --image (or a profile whose [machine] states one), or a payload with --payload");
+    // THE FILES THE PROGRAM READS FROM ITS OWN DIRECTORY, as the build tool that started this one
+    // lists them (mcpp's MCPP_RUNTIME_FILES: `<destination>TAB<source>' per line, the destination
+    // relative to the program's directory). They go where the program goes.
+    if (auto list = os::env::get("MCPP_RUNTIME_FILES"); list && !list->empty()) {
+        std::ifstream in(os::fs::from_utf8(*list), std::ios::binary);
+        if (!in)
+            return fail(std::format("MCPP_RUNTIME_FILES names {}, which cannot be read", *list));
+        for (std::string line; std::getline(in, line);) {
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+            const auto tab = line.find('\t');
+            if (line.empty())
+                continue;
+            if (tab == std::string::npos || tab == 0 || tab + 1 == line.size())
+                return fail(std::format("MCPP_RUNTIME_FILES: `{}' is not <destination><TAB><source>", line));
+            o.runtime_files.push_back({line.substr(tab + 1), line.substr(0, tab)});
+        }
+    }
+    if (o.payload.empty() && o.image.empty() && o.prof.vm.image.empty() && !o.prof.reached)
+        return fail("name an image with --image (or a profile whose [machine] states one), a payload with "
+                    "--payload, or a profile whose [reach] states how its guest is reached");
     if (o.payload.empty() && o.command.empty())
         return fail("name the command to run after `--'");
     return o;

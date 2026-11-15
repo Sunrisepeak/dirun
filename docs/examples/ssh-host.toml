@@ -1,0 +1,18 @@
+# A running host reached over ssh (dirun 0.4.0): no machine is started, and files are copied
+# with scp.
+#
+#     dirun --profile ssh-host.toml --var remote=user@builder -- ./program
+name = "ssh-host"
+
+[command]
+prepare = ["mkdir -p /tmp/dirun"]
+line    = "echo @@BEGIN@@; cd /tmp/dirun && {env}{argv} < /dev/null; echo @@STATUS=$?@@"
+env     = "env {assignments} "
+quote   = "posix"
+begin   = "@@BEGIN@@"
+status  = '@@STATUS=(\d+)@@'
+
+[reach]
+shell = ["ssh", "-o", "BatchMode=yes", "{remote}", "{line}"]
+push  = ["scp", "-q", "-p", "{host}", "{remote}:{guest}"]
+at    = "/tmp/dirun"

@@ -108,12 +108,104 @@ child dos{"fake-dos", [](std::vector<std::string> args) {
     std::ifstream run(dir / "RUN.BAT");
     std::string launcher((std::istreambuf_iterator<char>(run)), {});
     const bool dpmi = std::filesystem::exists(dir / "CWSDPMI.EXE");
-    std::ofstream(dir / "OUT.TXT") << "ran: " << launcher << (dpmi ? " with dpmi" : "") << "\r\n";
+    const bool data = std::filesystem::exists(dir / "DATA" / "D.TXT");
+    std::ofstream(dir / "OUT.TXT") << "ran: " << launcher << (dpmi ? " with dpmi" : "") << (data ? " with data" : "")
+                                   << "\r\n";
+    std::ofstream(dir / "ERR.TXT") << "a warning\r\n";
     std::ofstream(dir / "RC.TXT") << "42\r\n";
     return 0;
 }};
 
+// A guest reached by commands (0.4.0), played by one program: `push HOST GUEST' copies a file into
+// the guest's file system (a directory here), `shell ROOT LINE' runs a [command] line there,
+// `machine ROOT' is the machine (ready a second after it starts), `ready ROOT' succeeds once it is,
+// and `stop ROOT' records that it was asked to stop.
+child reached{"fake-reach", [](std::vector<std::string> args) {
+    if (args.empty())
+        return 9;
+    const std::string what = args[0];
+    if (what == "push" && args.size() == 3) {
+        std::filesystem::create_directories(std::filesystem::path(args[2]).parent_path());
+        std::filesystem::copy_file(args[1], args[2], std::filesystem::copy_options::overwrite_existing);
+        return 0;
+    }
+    if (what == "machine" && args.size() == 2) {
+        std::this_thread::sleep_for(std::chrono::seconds{1});
+        std::ofstream(std::filesystem::path(args[1]) / "booted") << "1";
+        std::this_thread::sleep_for(std::chrono::seconds{120});
+        return 0;
+    }
+    if (what == "ready" && args.size() == 2)
+        return std::filesystem::exists(std::filesystem::path(args[1]) / "booted") ? 0 : 1;
+    if (what == "stop" && args.size() == 2) {
+        std::ofstream(std::filesystem::path(args[1]) / "stopped") << "1";
+        return 0;
+    }
+    if (what != "shell" || args.size() != 3)
+        return 9;
+    const std::filesystem::path root = args[1];
+    const std::string line = args[2];
+    if (!line.starts_with("echo @@BEGIN@@;")) {  // a prepared line
+        std::ofstream(root / "prepared", std::ios::app) << line << "\n";
+        return 0;
+    }
+    auto w = words_of(line);
+    std::string out;
+    int status = 0;
+    if (!w.empty() && w.front().ends_with("/prog")) {  // a delivered program: the guest's files
+        for (const auto& e : std::filesystem::recursive_directory_iterator(root / "at"))
+            if (e.is_regular_file())
+                out += std::filesystem::relative(e.path(), root / "at").generic_string() + " ";
+    } else
+        for (std::size_t i = 0; i < w.size(); ++i) {
+            if (w[i] == "exit" && i + 1 < w.size())
+                status = std::stoi(w[++i]);
+            else if (w[i] != "say")
+                out += w[i] + " ";
+        }
+    std::cout << "@@BEGIN@@\n" << out << "\n@@STATUS=" << status << "@@\n";
+    std::cerr << "from the guest's error stream\n";
+    return 0;
+}};
+
 namespace {
+
+runner::options reached_options(const std::string& extra) {
+    runner::options o;
+    const auto root = temp_dir() / "guest";
+    std::filesystem::create_directories(root);
+    auto self = child_command("fake-reach", std::vector<std::string>{});
+    auto quoted = [&](std::vector<std::string> words) {
+        std::string t = "[";
+        for (const auto& w : words)
+            t += (t.size() > 1 ? ", " : "") + std::string("'") + w + "'";
+        return t + "]";
+    };
+    auto with = [&](std::vector<std::string> tail) {
+        auto words = self;
+        words.insert(words.end(), tail.begin(), tail.end());
+        return quoted(words);
+    };
+    const std::string text = std::format(R"toml([command]
+prepare = ["mkdir -p {{root}}/at"]
+line    = "echo @@BEGIN@@; {{env}}{{argv}} < /dev/null; echo @@STATUS=$?@@"
+env     = "env {{assignments}} "
+begin   = "@@BEGIN@@"
+status  = '@@STATUS=(\d+)@@'
+
+[reach]
+shell = {}
+push  = {}
+at    = "/at"
+{})toml", with({"shell", "{root}", "{line}"}), with({"push", "{host}", "{root}{guest}"}), extra);
+    auto p = dirun::profile::parse(text, "reach.toml");
+    if (!p)
+        throw std::runtime_error(p.error());
+    o.prof = *p;
+    o.vars = {{"root", root.generic_string()}};
+    o.timeout = 60;
+    return o;
+}
 
 runner::options guest_options(std::string mode) {
     runner::options o;
@@ -290,4 +382,78 @@ UTest long_line{"a command line longer than the console takes is written to the 
     expect(eq(r.status, 3));
     expect(contains(r.output, word)) << "the whole line ran";
     expect(contains(r.output, "dirun-command.sh (from a script)")) << "it was not typed";
+}};
+
+UTest reached_guest{"a guest reached by commands runs the command line and its status comes back", [] {
+    auto o = reached_options("");
+    o.command = {"say", "hello", "exit", "6"};
+    auto r = runner::run(o);
+    expect(eq(r.status, 6));
+    expect(contains(r.output, "hello"));
+    expect(contains(r.error_output, "from the guest's error stream")) << "the shell's standard error is kept apart";
+    std::ifstream prepared(temp_dir() / "guest" / "prepared");
+    std::string first;
+    std::getline(prepared, first);
+    expect(contains(first, "mkdir -p")) << "the prepared lines ran through the shell first";
+}};
+
+UTest reached_files{"a program and its runtime files are pushed into a reached guest, beside each other", [] {
+    auto o = reached_options("");
+    const auto program = temp_dir() / "prog";
+    std::ofstream(program) << "binary";
+    const auto data = temp_dir() / "d.txt";
+    std::ofstream(data) << "data";
+    o.command = {program.generic_string()};
+    o.runtime_files = {{data.generic_string(), "data/d.txt"}, {data.generic_string(), "../above.txt"}};
+    auto r = runner::run(o);
+    expect(eq(r.status, 0));
+    expect(contains(r.output, "prog")) << r.output;
+    expect(contains(r.output, "data/d.txt")) << "beside the program, at its destination";
+    expect(!contains(r.output, "above.txt")) << "a destination above the program's directory has no place";
+}};
+
+UTest reached_lifecycle{"a reached guest's machine is started, awaited until ready, and stopped", [] {
+    auto self = child_command("fake-reach", std::vector<std::string>{});
+    auto quoted = [&](std::vector<std::string> tail) {
+        auto words = self;
+        words.insert(words.end(), tail.begin(), tail.end());
+        std::string t = "[";
+        for (const auto& w : words)
+            t += (t.size() > 1 ? ", " : "") + std::string("'") + w + "'";
+        return t + "]";
+    };
+    auto o = reached_options(std::format("\n[start]\ncommand = {}\nready = {}\nstop = {}\nready-timeout = 30\n",
+                                         quoted({"machine", "{root}"}), quoted({"ready", "{root}"}),
+                                         quoted({"stop", "{root}"})));
+    o.command = {"say", "up"};
+    auto r = runner::run(o);
+    expect(eq(r.status, 0));
+    expect(std::filesystem::exists(temp_dir() / "guest" / "booted")) << "the command ran once the machine was ready";
+    expect(std::filesystem::exists(temp_dir() / "guest" / "stopped")) << "the machine was asked to stop";
+}};
+
+UTest payload_files{"a payload's runtime files go beside it, and its standard error is read from its file", [] {
+    runner::options o;
+    o.payload = (temp_dir() / "hello.exe").generic_string();
+    std::ofstream(o.payload) << "MZ";
+    const auto data = temp_dir() / "d.txt";
+    std::ofstream(data) << "data";
+    o.runtime_files = {{data.generic_string(), "DATA/D.TXT"}};
+    auto p = dirun::profile::parse(R"toml([payload]
+machine     = false
+args        = ["-dir", "{dir}"]
+place       = "PROG.EXE"
+files       = { "RUN.BAT" = "PROG.EXE {args} > OUT.TXT" }
+status      = "file"
+status-file = "RC.TXT"
+output-file = "OUT.TXT"
+stderr-file = "ERR.TXT"
+)toml", "dos.toml");
+    expect(fatal(p.has_value())) << (p ? "" : p.error());
+    o.prof = *p;
+    o.emulator = child_command("fake-dos", std::vector<std::string>{});
+    o.timeout = 30;
+    auto r = runner::run(o);
+    expect(contains(r.output, "with data")) << "the runtime file is beside the program";
+    expect(eq(r.error_output, std::string("a warning\n"))) << "the program's standard error, apart from its output";
 }};

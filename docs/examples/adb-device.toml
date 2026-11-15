@@ -1,0 +1,19 @@
+# A device or an emulator that is already running, reached through adb (dirun 0.4.0). A system
+# image package states its own profile with [start] for the emulator it boots; this one names
+# only the bridge.
+#
+#     dirun --profile adb-device.toml --var adb=/path/to/adb --var serial=emulator-5554 -- ./program
+name = "adb-device"
+
+[command]
+prepare = ["mkdir -p /data/local/tmp/dirun"]
+line    = "echo @@BEGIN@@; cd /data/local/tmp/dirun && {env}{argv} < /dev/null; echo @@STATUS=$?@@"
+env     = "env {assignments} "
+quote   = "posix"
+begin   = "@@BEGIN@@"
+status  = '@@STATUS=(\d+)@@'
+
+[reach]
+shell = ["{adb}", "-s", "{serial}", "shell", "{line}"]
+push  = ["{adb}", "-s", "{serial}", "push", "{host}", "{guest}"]
+at    = "/data/local/tmp/dirun"

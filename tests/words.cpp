@@ -1,6 +1,8 @@
 // The contract carries no vocabulary of a particular ecosystem: dirun is usable by any CI. The build
 // configuration may name what it builds with, a source its imports and namespace aliases, and the
-// README the commands that build it; nothing else may.
+// README the commands that build it; nothing else may. One protocol variable is named where it is
+// read and specified: MCPP_RUNTIME_FILES, the files a build tool lists beside a program it hands to
+// a runner (0.4.0), as MTEST_PROTOCOL is a test runner's.
 import std;
 import mcpplibs.mtest;
 
@@ -14,7 +16,7 @@ std::filesystem::path repository() {
 
 UTest words{"no ecosystem's words outside the build configuration", [] {
     const std::regex banned{R"(mcpp|mcpplibs|openkal|xim(?![a-z])|xlings)", std::regex::icase};
-    const std::regex source_allowance{R"(import\s+mcpplibs|mcpplibs::|import\s+nlohmann|import\s+tomlplusplus)"};
+    const std::regex source_allowance{R"(import\s+mcpplibs|mcpplibs::|import\s+nlohmann|import\s+tomlplusplus|MCPP_RUNTIME_FILES)"};
     const std::regex prose_allowance{R"(\bmcpp (build|run|test)\b|the mcpp build)"};
     const std::set<std::string> scanned{".md", ".cppm", ".cpp", ".toml"};
     std::vector<std::string> found;
