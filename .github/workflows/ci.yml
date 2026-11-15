@@ -14,7 +14,7 @@ concurrency:
 env:
   XLINGS_NON_INTERACTIVE: '1'
   # The build pins, one place (mirrors the ecosystem's setup action shape).
-  MCPP_VERSION: 2026.11.12.1
+  MCPP_VERSION: 2026.11.15.1
   XLINGS_VERSION: v2026.10.26.1
   LLVM_VERSION: 23.1.3
 
