@@ -15,9 +15,9 @@
   destination above the program's directory is reported, not delivered.
 - **`[payload] stderr-file`.** The program's standard error, which a launcher wrote to a file of
   `{dir}`, is written to this program's standard error, apart from the output.
-- **The package's okrun is the openkal platform's of 0.28.1** (openkal-tools 0.6.4), which normalises
-  the image's path: a package started through a path with `//` or `..` runs. CI's package job starts
-  the package that way.
+- **The package's image launcher is the platform's of 0.28.1**, pinned in the build configuration,
+  which normalises the image's path: a package started through a path with `//` or `..` runs. CI's
+  package job starts the package that way.
 
 ## 0.3.2 -- 2026-11-13
 
