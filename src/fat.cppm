@@ -184,7 +184,11 @@ std::expected<void, std::string> read_tree(node& dir) {
             n.dir = true;
             if (auto r = read_tree(n); !r) return r;
         } else if (e.is_regular_file()) {
-            n.size = e.file_size();
+            // The size is asked of the file, not of the entry the listing cached.
+            std::error_code size_ec;
+            n.size = std::filesystem::file_size(e.path(), size_ec);
+            if (size_ec)
+                return std::unexpected("cannot read the size of " + e.path().string() + ": " + size_ec.message());
             if (n.size > 0xFFFFFFFFull)
                 return std::unexpected("a file larger than FAT's 4 GiB: " + e.path().string());
         } else {

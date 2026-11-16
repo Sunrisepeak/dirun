@@ -173,6 +173,8 @@ UTest names{"short names stay short, other names are long, aliases are unique", 
 
 UTest nesting{"a directory's entries, its `.' and `..', and a file across clusters", [] {
     const auto root = tree();
+    expect(fatal(eq(std::filesystem::file_size(root / "share" / "deep" / "three-clusters.txt"), std::uintmax_t(3000))))
+        << "the tree's file was not written";
     const auto image = scratch("nesting") / "disk.img";
     expect(fatal(dirun::fat::write(root, image).has_value()));
     const auto v = load(image);

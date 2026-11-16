@@ -15,7 +15,7 @@ import dirun.runner;
 
 export namespace dirun::cli {
 
-inline constexpr std::string_view version = "0.5.0";
+inline constexpr std::string_view version = "0.6.0";
 
 // What a command line describes, without running it.
 struct parsed {
