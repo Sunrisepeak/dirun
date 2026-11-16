@@ -26,8 +26,9 @@ reached guest is started and entered are a **profile**, data that ships with the
 | 126 | a prerequisite is unusable: the emulator, the image, the profile, a file to deliver |
 | 130, 143 | interrupted (SIGINT, SIGTERM); the emulator is ended |
 
-The base image is never written: a temporary overlay is booted and removed. The console is read
-over a pipe, the same on Linux, macOS and Windows hosts.
+The base image is never written: a temporary overlay is booted and removed. A payload reaches the
+emulator as a directory or, for a program that writes files, as a writable FAT32 disk written from
+it. The console is read over a pipe, the same on Linux, macOS and Windows hosts.
 
 - [docs/contract.md](docs/contract.md) -- the command line, the marker protocol, the exit statuses
 - [docs/profiles.md](docs/profiles.md) -- the profile format, with the guest and payload forms

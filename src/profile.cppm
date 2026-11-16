@@ -83,6 +83,8 @@ struct payload {
                                     // the profile file's directory's (a package ships its profile)
     std::vector<std::string> beside;  // files delivered beside the payload, from the profile's directory
     std::string stderr_file;        // a file in {dir} holding the program's standard error (0.4.0)
+    std::string disk = "directory"; // what the emulator is given (0.6.0): directory, {dir} itself;
+                                    // fat-image, a writable FAT32 disk written from {dir}, {disk}
 };
 
 // A guest reached by commands rather than by a console this program drives (0.4.0): a device
@@ -300,7 +302,7 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
     if (auto y = t["payload"].as_table()) {
         if (auto k = known(*y, o + " [payload]", {"args", "machine", "place", "files", "status", "marker",
                                                    "status-file", "output-file", "after", "env", "emulator",
-                                                   "beside", "stderr-file", "quote"});
+                                                   "beside", "stderr-file", "quote", "disk"});
             !k)
             return std::unexpected(k.error());
         payload pl;
@@ -327,6 +329,14 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
         pl.stderr_file = (*y)["stderr-file"].value_or(std::string());
         pl.after = (*y)["after"].value_or(std::string());
         pl.quote = (*y)["quote"].value_or(std::string("none"));
+        pl.disk = (*y)["disk"].value_or(std::string("directory"));
+        if (pl.disk != "directory" && pl.disk != "fat-image")
+            return std::unexpected(std::format("{}: [payload] disk is directory or fat-image, not `{}'", o, pl.disk));
+        // A FAT image is written before the run and not read after it: what the guest writes stays
+        // in the image, so no result can be read from {dir}.
+        if (pl.disk == "fat-image" && (pl.status == "file" || !pl.output_file.empty() || !pl.stderr_file.empty()))
+            return std::unexpected(o + ": [payload] disk = \"fat-image\" is not read back after the run, so it "
+                                       "takes no status-file, output-file or stderr-file");
         if (!quoting_style(pl.quote))
             return std::unexpected(std::format("{}: [payload] quote is {}, not `{}'", o, quoting_styles_named, pl.quote));
         if (pl.status != "exit" && pl.status != "debug-exit" && pl.status != "marker" && pl.status != "file")

@@ -98,6 +98,22 @@ child firmware{"fake-firmware", [](std::vector<std::string>) {
     return 2 * 5 + 1;
 }};
 
+// A firmware given a disk (0.6.0): it finds `file=' naming the image, checks that the image is a
+// disk with a FAT32 partition, and reports the payload's status as a debug-exit device would.
+child firmware_disk{"fake-firmware-disk", [](std::vector<std::string> args) {
+    std::string image;
+    for (const auto& a : args)
+        if (auto at = a.find("file="); at != std::string::npos)
+            image = a.substr(at + 5);
+    std::ifstream in(image, std::ios::binary);
+    std::vector<char> head(1 << 20 | 512);
+    in.read(head.data(), std::streamsize(head.size()));
+    const bool fat32 = in && std::string_view(head.data() + (1 << 20) + 82, 8) == "FAT32   " &&
+                       static_cast<unsigned char>(head[510]) == 0x55;
+    std::cout << "BOOTED\r\n" << (fat32 ? "a FAT32 disk" : "no disk") << "\r\n" << std::flush;
+    return 2 * 6 + 1;
+}};
+
 // An emulator that is not QEMU and whose own status is not the program's (a DOS machine): given
 // the directory, it reads the launcher the profile wrote there, "runs" it, and writes the program's
 // output and status as files in that directory. It exits 0 whatever the program did.
@@ -299,6 +315,27 @@ after = "BOOTED\n"
     auto r = runner::run(o);
     expect(eq(r.status, 5));
     expect(eq(r.output, std::string("hello from the payload\n")));
+}};
+
+UTest payload_disk{"a payload profile with disk = \"fat-image\" gives the emulator a FAT32 disk as {disk}", [] {
+    runner::options o;
+    o.payload = (temp_dir() / "app.efi").generic_string();
+    std::ofstream(o.payload) << "MZ";
+    auto p = dirun::profile::parse(R"([payload]
+args = ["-drive", "if=virtio,format=raw,file={disk}"]
+place = "APP.EFI"
+files = { "startup.nsh" = "APP.EFI {args}" }
+disk = "fat-image"
+status = "debug-exit"
+after = "BOOTED\n"
+)", "uefi.toml");
+    expect(fatal(p.has_value())) << (p ? "" : p.error());
+    o.prof = *p;
+    o.emulator = child_command("fake-firmware-disk", std::vector<std::string>{});
+    o.timeout = 30;
+    auto r = runner::run(o);
+    expect(eq(r.status, 6));
+    expect(eq(r.output, std::string("a FAT32 disk\n")));
 }};
 
 UTest payload_never_started{"a payload whose boot never ended did not run, whatever the status", [] {

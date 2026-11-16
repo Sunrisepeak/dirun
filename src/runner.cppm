@@ -13,6 +13,7 @@ export module dirun.runner;
 import std;
 import mcpplibs.os;
 import mcpplibs.mtest.e2e;
+import dirun.fat;
 import dirun.profile;
 import dirun.protocol;
 
@@ -452,6 +453,14 @@ result run_payload(const options& o, const clock& c) {
         put(os::fs::from_utf8(f), os::fs::utf8(os::fs::from_utf8(f).filename()));
     for (const auto& [name, text] : pl.files)
         std::ofstream(root / os::fs::from_utf8(name), std::ios::binary) << expanded(text, vars);
+    if (pl.disk == "fat-image") {
+        // The emulator is given a writable disk holding {dir} ({disk}), not the directory: a
+        // directory presented as a FAT volume is read-only (QEMU's `fat:' without `rw').
+        const auto image = dir.path() / "payload.img";
+        if (auto w = fat::write(root, image); !w)
+            throw error("the payload's FAT image could not be written: " + w.error(), exit_unusable);
+        vars["disk"] = str(image);
+    }
     auto opts = o;
     opts.vars = vars;
     if (opts.emulator.empty() && !pl.emulator.empty())
