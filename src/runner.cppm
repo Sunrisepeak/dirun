@@ -424,9 +424,9 @@ result run_payload(const options& o, const clock& c) {
     vars["payload"] = str(std::filesystem::absolute(os::fs::from_utf8(o.payload)));
     vars["dir"] = str(root);
     {
-        std::string args;  // the program's arguments, as a launcher file writes them
+        std::string args;  // the program's arguments, as the reader of the launcher file takes them
         for (const auto& a : o.command)
-            args += (args.empty() ? "" : " ") + a;
+            args += (args.empty() ? "" : " ") + protocol::quote(pl.quote, a);
         vars["args"] = args;
     }
     std::filesystem::create_directories(root);

@@ -38,7 +38,7 @@ line    = "echo @@BEGIN@@; {env}{argv} < /dev/null; echo @@STATUS=$?@@"
 line-max = 200               # a longer line is written to the files disk and run from there
 script   = "sh {script}"     # how; {script} is its name in the guest
 env     = "env {assignments} "   # how NAME=VALUE words precede the command
-quote   = "posix"            # posix: single-quoted words; none: as given
+quote   = "posix"            # posix, uefi-shell or none: how each word is written (below)
 begin   = "@@BEGIN@@"
 status  = "@@STATUS=(\\d+)@@"
 
@@ -58,6 +58,7 @@ status = "debug-exit"        # exit, debug-exit, marker or file
 marker = ""                  # status = "marker": a pattern whose first group is the status
 after  = ""                  # output before this pattern's first match is boot noise
 machine = true               # false: the emulator is not QEMU and is given only `args`
+quote   = "none"             # how each argument is written into {args}: posix, uefi-shell or none (0.5.0)
 # files       = { "RUN.BAT" = "PROG.EXE {args} > OUT.TXT" }   # templates written into {dir}
 # status-file = "RC.TXT"     # status = "file": the number a launcher wrote
 # output-file = "OUT.TXT"    # the program's output, read from {dir}
@@ -95,6 +96,15 @@ program is placed in `{dir}`, a launcher written beside it runs it with `{args}`
 output and status as files, and the status is read from them, because DOSBox's own exit status is
 not the program's and its command interpreter has no `%ERRORLEVEL%` (the status is read one digit at
 a time with `if errorlevel`).
+
+A word reaches the guest through a line another program reads: a POSIX shell, the UEFI Shell, DOS's
+command interpreter. The quoting style is therefore the profile's, for its command line (`[command]
+quote`) and for the arguments written into a payload's launcher or emulator words (`[payload]
+quote`). `posix` single-quotes each word and is safe for any byte. `uefi-shell` writes a word that
+is empty, or holds a blank or one of `"`, `^`, `%`, `#`, in double quotes, with `^` before each of
+those four; the UEFI Shell splits a line at blanks outside quotes and reads `^` as an escape (UEFI
+Shell Specification 2.2). `none` writes the words as given: a reader with no quoting, such as
+COMMAND.COM, cannot take a blank in a word.
 
 The last boot step's pattern is the shell's prompt. A guest whose command interpreter has no
 `$?` states its own `line` and `status`: what the command line looks like is the profile's, not the

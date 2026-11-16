@@ -374,6 +374,31 @@ output-file = "OUT.TXT"
         << "the launcher carries the program's arguments, and a delivered file is beside it";
 }};
 
+UTest payload_quoting{"a payload's arguments reach its launcher file in the profile's quoting style", [] {
+    runner::options o;
+    o.payload = (temp_dir() / "hello.exe").generic_string();
+    std::ofstream(o.payload) << "MZ";
+    auto p = dirun::profile::parse(R"toml([payload]
+machine     = false
+args        = ["-dir", "{dir}"]
+place       = "PROG.EXE"
+files       = { "RUN.BAT" = "PROG.EXE {args} > OUT.TXT" }
+status      = "file"
+status-file = "RC.TXT"
+output-file = "OUT.TXT"
+quote       = "uefi-shell"
+)toml", "shell.toml");
+    expect(fatal(p.has_value())) << (p ? "" : p.error());
+    o.prof = *p;
+    o.command = {"one", "two three"};
+    o.emulator = child_command("fake-dos", std::vector<std::string>{});
+    o.timeout = 30;
+    auto r = runner::run(o);
+    expect(contains(r.output, "ran: PROG.EXE one \"two three\" > OUT.TXT")) << r.output;
+    expect(!dirun::profile::parse("[payload]\nquote = \"cmd\"\n", "bad.toml").has_value())
+        << "a quoting style the profile cannot name is refused";
+}};
+
 UTest long_line{"a command line longer than the console takes is written to the files disk and run from it", [] {
     auto o = guest_options("password");
     const std::string word(400, 'w');
