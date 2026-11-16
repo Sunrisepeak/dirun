@@ -13,6 +13,16 @@ UTest quoting{"a word is single-quoted for a POSIX shell", [] {
     expect(eq(protocol::quote_posix(""), std::string("''")));
 }};
 
+UTest uefi_quoting{"a word for the UEFI Shell is bare unless a blank or a special character needs quotes", [] {
+    expect(eq(protocol::quote_uefi_shell("one"), std::string("one")));
+    expect(eq(protocol::quote_uefi_shell("two three"), std::string("\"two three\"")));
+    expect(eq(protocol::quote_uefi_shell(""), std::string("\"\"")));
+    expect(eq(protocol::quote_uefi_shell("a\"b"), std::string("\"a^\"b\"")));
+    expect(eq(protocol::quote_uefi_shell("50%#^"), std::string("\"50^%^#^^\"")));
+    expect(eq(protocol::quote("none", "a b"), std::string("a b")));
+    expect(eq(protocol::quote("posix", "a b"), std::string("'a b'")));
+}};
+
 UTest wrapping{"the words of a command are one command, the environment before them", [] {
     const auto c = dirun::profile::builtin().cmd;
     auto line = protocol::wrap(c, {"echo", "hello world"}, {{"K", "v 1"}});

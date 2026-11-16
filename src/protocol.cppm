@@ -18,14 +18,37 @@ std::string quote_posix(std::string_view word) {
     return out + "'";
 }
 
+// A word for the UEFI Shell (profile::quoting_styles).
+std::string quote_uefi_shell(std::string_view word) {
+    constexpr std::string_view special = "\"^%#";
+    const bool bare = !word.empty() && word.find_first_of(" \t") == std::string_view::npos
+                      && word.find_first_of(special) == std::string_view::npos;
+    if (bare)
+        return std::string(word);
+    std::string out = "\"";
+    for (char c : word) {
+        if (special.find(c) != std::string_view::npos)
+            out += '^';
+        out += c;
+    }
+    return out + "\"";
+}
+
+// A word in the profile's quoting style (profile::quoting_styles).
+std::string quote(std::string_view style, std::string_view word) {
+    if (style == "posix")
+        return quote_posix(word);
+    if (style == "uefi-shell")
+        return quote_uefi_shell(word);
+    return std::string(word);
+}
+
 // The command line the profile describes, for `argv' with `env' (NAME, value) before it. The words
 // are joined by spaces: they are one command.
 std::expected<std::string, std::string>
 wrap(const profile::command& c, const std::vector<std::string>& argv,
      const std::vector<std::pair<std::string, std::string>>& env) {
-    auto word = [&](std::string_view w) {
-        return c.quote == "posix" ? quote_posix(w) : std::string(w);
-    };
+    auto word = [&](std::string_view w) { return quote(c.quote, w); };
     std::string words;
     for (const auto& a : argv)
         words += (words.empty() ? "" : " ") + word(a);

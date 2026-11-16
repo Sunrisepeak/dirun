@@ -10,6 +10,24 @@ import tomlplusplus;
 
 export namespace dirun::profile {
 
+// THE QUOTING STYLES: how a word reaches the program that reads the line it is written into. The
+// line's reader is the guest's -- a POSIX shell, the UEFI Shell, DOS's COMMAND.COM -- so the
+// style is the profile's, for its command line ([command] quote) and for the arguments a payload's
+// launcher file or emulator word carries ([payload] quote).
+//
+//   posix       each word single-quoted (safe for any byte)
+//   uefi-shell  a word that is empty, or holds a blank or one of `"', `^', `%', `#', in double
+//               quotes, with `^' before each of those four (UEFI Shell Specification 2.2: the
+//               Shell splits a line at blanks outside quotes, and `^' makes the next character
+//               literal)
+//   none        the words as given; a reader with no quoting (COMMAND.COM) cannot take a blank
+//               in a word
+inline constexpr std::array<std::string_view, 3> quoting_styles{"posix", "uefi-shell", "none"};
+inline constexpr std::string_view quoting_styles_named = "posix, uefi-shell or none";
+inline bool quoting_style(std::string_view s) {
+    return std::ranges::find(quoting_styles, s) != quoting_styles.end();
+}
+
 struct step {
     std::string expect;            // ECMAScript regex awaited on the console
     std::optional<std::string> send;  // written after it matched; nothing: no reply
@@ -36,7 +54,7 @@ struct command {
     std::vector<std::string> prepare;  // lines sent before the command, each on its own
     std::string line;                  // the command line; {env} and {argv} are filled in
     std::string env;                   // how the environment precedes the words; {assignments}
-    std::string quote = "posix";       // posix: each word single-quoted; none: words as given
+    std::string quote = "posix";       // how each word is written: a quoting style (quoting_styles)
     std::string begin;                 // the marker after which the program's output begins
     std::string status;                // a regex whose first group is the program's status
     int line_max = 0;                  // a longer line is not typed: a console's input line is
@@ -58,6 +76,8 @@ struct payload {
     std::string status_file;        // status = file: the file in {dir} holding the status
     std::string output_file;        // a file in {dir} holding the program's output, read when it ends
     std::string after;              // output before this regex's first match is boot noise
+    std::string quote = "none";     // how each of the program's arguments is written into {args}:
+                                    // a quoting style (quoting_styles); none: as given (0.5.0)
     std::map<std::string, std::string> env;  // the emulator's environment (a display it needs none of)
     std::string emulator;           // the emulator when --emulator is not given; a relative name is
                                     // the profile file's directory's (a package ships its profile)
@@ -255,8 +275,8 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
         p.cmd.script = (*c)["script"].value_or(std::string());
         if (p.cmd.line_max > 0 && p.cmd.script.empty())
             return std::unexpected(o + ": [command] line-max needs `script', how a line written as a file runs");
-        if (p.cmd.quote != "posix" && p.cmd.quote != "none")
-            return std::unexpected(std::format("{}: [command] quote is posix or none, not `{}'", o, p.cmd.quote));
+        if (!quoting_style(p.cmd.quote))
+            return std::unexpected(std::format("{}: [command] quote is {}, not `{}'", o, quoting_styles_named, p.cmd.quote));
         if (p.cmd.line.empty() || p.cmd.begin.empty() || p.cmd.status.empty() || !valid_regex(p.cmd.status))
             return std::unexpected(o + ": [command] needs `line', `begin' and a valid `status' pattern");
     }
@@ -280,7 +300,7 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
     if (auto y = t["payload"].as_table()) {
         if (auto k = known(*y, o + " [payload]", {"args", "machine", "place", "files", "status", "marker",
                                                    "status-file", "output-file", "after", "env", "emulator",
-                                                   "beside", "stderr-file"});
+                                                   "beside", "stderr-file", "quote"});
             !k)
             return std::unexpected(k.error());
         payload pl;
@@ -306,6 +326,9 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
         pl.output_file = (*y)["output-file"].value_or(std::string());
         pl.stderr_file = (*y)["stderr-file"].value_or(std::string());
         pl.after = (*y)["after"].value_or(std::string());
+        pl.quote = (*y)["quote"].value_or(std::string("none"));
+        if (!quoting_style(pl.quote))
+            return std::unexpected(std::format("{}: [payload] quote is {}, not `{}'", o, quoting_styles_named, pl.quote));
         if (pl.status != "exit" && pl.status != "debug-exit" && pl.status != "marker" && pl.status != "file")
             return std::unexpected(std::format("{}: [payload] status is exit, debug-exit, marker or file, not `{}'", o, pl.status));
         if (pl.status == "file" && pl.status_file.empty())

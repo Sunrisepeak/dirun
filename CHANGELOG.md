@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0 -- 2026-11-16
+
+- **A payload's arguments are quoted for the program that reads its launcher.** `[payload] quote`
+  names how each of the program's arguments is written into `{args}`: `posix`, `uefi-shell` or
+  `none` (the default, the words as given, as before). The UEFI Shell splits a `startup.nsh` line
+  at blanks outside double quotes and reads `^` as an escape, so `uefi-shell` writes a word that is
+  empty, or holds a blank, `"`, `^`, `%` or `#`, in double quotes with `^` before each of the four:
+  `one "two three"` reaches the application as two arguments. The same styles are `[command]
+  quote`'s, which also takes `uefi-shell`.
+
 ## 0.4.0 -- 2026-11-15
 
 - **A guest reached by commands.** A profile's `[reach]` states how a guest that this program does
