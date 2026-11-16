@@ -112,8 +112,9 @@ bool on_path(const std::string& tool) {
     return false;
 }
 
-std::filesystem::path tree() {
-    const auto root = scratch("tree");
+// Each case has a tree of its own: the cases of a program may run at once.
+std::filesystem::path tree(std::string_view name) {
+    const auto root = scratch(std::format("tree-{}", name));
     std::ofstream(root / "APP.EFI", std::ios::binary) << "MZ-application";
     std::ofstream(root / "startup.nsh", std::ios::binary) << "fs0:\r\nAPP.EFI\r\n";
     std::ofstream(root / "a name with blanks.data", std::ios::binary) << "blanks";
@@ -131,7 +132,7 @@ std::filesystem::path tree() {
 }  // namespace
 
 UTest disk{"the disk is an MBR with one FAT32 partition the format's rules read", [] {
-    const auto root = tree();
+    const auto root = tree("disk");
     const auto image = scratch("disk") / "disk.img";
     auto w = dirun::fat::write(root, image);
     expect(fatal(w.has_value())) << (w ? "" : w.error());
@@ -147,7 +148,7 @@ UTest disk{"the disk is an MBR with one FAT32 partition the format's rules read"
 }};
 
 UTest names{"short names stay short, other names are long, aliases are unique", [] {
-    const auto root = tree();
+    const auto root = tree("names");
     const auto image = scratch("names") / "disk.img";
     expect(fatal(dirun::fat::write(root, image).has_value()));
     const auto v = load(image);
@@ -172,7 +173,7 @@ UTest names{"short names stay short, other names are long, aliases are unique", 
 }};
 
 UTest nesting{"a directory's entries, its `.' and `..', and a file across clusters", [] {
-    const auto root = tree();
+    const auto root = tree("nesting");
     expect(fatal(eq(std::filesystem::file_size(root / "share" / "deep" / "three-clusters.txt"), std::uintmax_t(3000))))
         << "the tree's file was not written";
     const auto image = scratch("nesting") / "disk.img";
@@ -201,7 +202,7 @@ UTest tools{"mtools and fsck.fat read the disk (where they are on PATH)", [] {
         std::println("skipped: mtools or dosfstools is not on PATH");
         return;
     }
-    const auto root = tree();
+    const auto root = tree("tools");
     const auto dir = scratch("tools");
     const auto image = dir / "disk.img";
     expect(fatal(dirun::fat::write(root, image).has_value()));
