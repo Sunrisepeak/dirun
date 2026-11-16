@@ -112,7 +112,7 @@ bool on_path(const std::string& tool) {
     return false;
 }
 
-// Each case has a tree of its own: the cases of a program may run at once.
+// Each case writes a tree of its own.
 std::filesystem::path tree(std::string_view name) {
     const auto root = scratch(std::format("tree-{}", name));
     std::ofstream(root / "APP.EFI", std::ios::binary) << "MZ-application";
@@ -179,7 +179,8 @@ UTest nesting{"a directory's entries, its `.' and `..', and a file across cluste
     const auto image = scratch("nesting") / "disk.img";
     expect(fatal(dirun::fat::write(root, image).has_value()));
     const auto v = load(image);
-    const auto* share = find(list(v, v.root), u"share");
+    const auto top = list(v, v.root);   // kept: `find` points into it
+    const auto* share = find(top, u"share");
     expect(fatal(share != nullptr && share->dir));
     const auto inside = list(v, share->first);
     expect(fatal(inside.size() >= 3u));
@@ -189,7 +190,8 @@ UTest nesting{"a directory's entries, its `.' and `..', and a file across cluste
     expect(eq(inside[1].first, 0u)) << "`..' of a directory in the root names cluster 0";
     const auto* deep = find(inside, u"deep");
     expect(fatal(deep != nullptr));
-    const auto* big = find(list(v, deep->first), u"three-clusters.txt");
+    const auto below = list(v, deep->first);
+    const auto* big = find(below, u"three-clusters.txt");
     expect(fatal(big != nullptr));
     expect(eq(big->size, 3000u));
     const auto content = text(v.chain(big->first, big->size));
