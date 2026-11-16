@@ -59,6 +59,7 @@ marker = ""                  # status = "marker": a pattern whose first group is
 after  = ""                  # output before this pattern's first match is boot noise
 machine = true               # false: the emulator is not QEMU and is given only `args`
 quote   = "none"             # how each argument is written into {args}: posix, uefi-shell or none (0.5.0)
+disk    = "directory"        # directory: {dir} itself; fat-image: a writable FAT32 disk of {dir}, {disk} (0.6.0)
 # files       = { "RUN.BAT" = "PROG.EXE {args} > OUT.TXT" }   # templates written into {dir}
 # status-file = "RC.TXT"     # status = "file": the number a launcher wrote
 # output-file = "OUT.TXT"    # the program's output, read from {dir}
@@ -67,6 +68,16 @@ quote   = "none"             # how each argument is written into {args}: posix, 
 # emulator    = "bin/dosbox" # when --emulator is not given; relative: beside this file
 # beside      = ["CWSDPMI.EXE"]   # files beside this file, delivered beside the payload
 ```
+
+`disk` states what the emulator is given (0.6.0). With `directory`, the emulator is given `{dir}`
+and presents it as it can: QEMU's `fat:{dir}` presents a directory as a FAT volume that is read-only
+unless `rw` is added, and `rw` is not reliable. With `fat-image`, dirun writes a disk image after
+`{dir}` is complete --- a master boot record and one FAT32 partition holding every file of `{dir}`,
+long names included --- and `{disk}` names it; the profile gives it to the emulator as a writable
+drive (`"-drive", "if=virtio,format=raw,file={disk}"`). The image is written and not read back:
+what the guest writes stays in the image, removed with the run's directory, so `fat-image` takes no
+`status-file`, `output-file` or `stderr-file`. The program's result comes back on the console and in
+its status.
 
 A guest reached by commands (0.4.0) has `[reach]` in place of `[machine]`, `[[boot]]` and `[files]`,
 and `[start]` when this program starts its machine. Its `[command]` is the guest's command line, as

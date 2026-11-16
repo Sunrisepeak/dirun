@@ -111,3 +111,15 @@ UTest examples{"each example profile of the documentation is a profile", [] {
     }
     expect(eq(seen, 2));
 }};
+
+UTest disk{"a payload's disk is its directory or a FAT image, and an image is not read back", [] {
+    auto p = profile::parse("[payload]\nargs = [\"-drive\", \"file={disk}\"]\ndisk = \"fat-image\"\nstatus = \"debug-exit\"\n", "t.toml");
+    expect(fatal(p.has_value())) << (p ? "" : p.error());
+    expect(eq(p->boot_payload->disk, std::string("fat-image")));
+    expect(eq(profile::parse("[payload]\n", "t.toml")->boot_payload->disk, std::string("directory")));
+    expect(!profile::parse("[payload]\ndisk = \"vhd\"\n", "t.toml").has_value());
+    auto read_back = profile::parse("[payload]\ndisk = \"fat-image\"\nstatus = \"file\"\nstatus-file = \"RC.TXT\"\n", "t.toml");
+    expect(fatal(!read_back.has_value()));
+    expect(contains(read_back.error(), "not read back"));
+    expect(!profile::parse("[payload]\ndisk = \"fat-image\"\noutput-file = \"OUT.TXT\"\n", "t.toml").has_value());
+}};

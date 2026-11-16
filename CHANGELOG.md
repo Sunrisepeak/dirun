@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0 -- 2026-11-16
+
+- **A payload on a writable FAT32 disk.** `[payload] disk = "fat-image"` gives the emulator a disk
+  image written from `{dir}` (`{disk}`) in place of the directory: a master boot record with one
+  FAT32 partition from 1 MiB, holding the payload, the files delivered with it, the runtime files
+  and the launcher files, under their long names. A program that writes files can run on it; QEMU's
+  `fat:{dir}` is read-only. The image is not read back after the run, so this disk takes no
+  `status-file`, `output-file` or `stderr-file`. `disk = "directory"` is the default and the
+  behaviour of 0.5.0.
+- **`dirun.fat`**, the writer, is a module of its own that depends on nothing else of dirun: a tree
+  in, a disk image out. Every name that is not an upper-case 8.3 name has long-name entries and an
+  alias; timestamps are the FAT epoch. Its tests read the image by the format's rules on every host,
+  and with mtools and `fsck.fat` on Linux.
+
 ## 0.5.0 -- 2026-11-16
 
 - **A payload's arguments are quoted for the program that reads its launcher.** `[payload] quote`
