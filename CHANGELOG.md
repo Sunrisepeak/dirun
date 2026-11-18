@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0 -- 2026-11-18
+
+- **`[machine] bus`.** The image and the files disk are attached by the interface the profile
+  states, `virtio` (the default, and the behaviour of 0.6.0) or `ide`. A system with no virtio
+  driver finds neither disk on virtio (measured: GNU/Hurd's rumpdisk, `No such device or address`
+  for its root); with `ide` its disks are behind the controller the machine type emulates.
+  An emulated IDE disk cannot be read-only, so there the files are a FAT32 image dirun writes.
+- **`[files] form = "tar"`.** The files disk is a ustar archive from its first sector, for a guest
+  that reads no FAT volume or does not read one reliably (measured: GNU/Hurd's fatfs does not
+  answer on a FAT32 volume); the mount step is `tar xf <device>`. `fat` is the default.
+
 ## 0.6.0 -- 2026-11-16
 
 - **A payload on a writable FAT32 disk.** `[payload] disk = "fat-image"` gives the emulator a disk
