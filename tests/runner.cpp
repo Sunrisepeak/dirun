@@ -40,6 +40,32 @@ child guest{"fake-guest", [](std::vector<std::string> args) {
             for (const auto& e : std::filesystem::directory_iterator(dir))
                 disk += " " + e.path().filename().string();
         }
+    // The files disk as an image of its own (0.7.0): a tar archive from its first sector, whose
+    // names are read here by the format's rule, or the FAT32 image an IDE guest is given; and the
+    // interface the disks are on.
+    for (const auto& a : args) {
+        const auto at = a.find("file=");
+        if (at == std::string::npos || a.find("file=fat:") != std::string::npos)
+            continue;
+        const auto file = a.substr(at + 5, a.find(',', at) - at - 5);
+        if (file.ends_with("files.tar")) {
+            std::ifstream in(file, std::ios::binary);
+            std::array<char, 512> h{};
+            while (in.read(h.data(), 512) && h[0] != 0) {
+                const std::string name(h.data(), std::find(h.data(), h.data() + 100, char{0}));
+                const auto size = std::stoull(std::string(h.data() + 124, 11), nullptr, 8);
+                disk += " tar:" + name + (std::string_view(h.data() + 257, 5) == "ustar" ? "" : "(not ustar)");
+                in.seekg(static_cast<std::streamoff>((size + 511) / 512 * 512), std::ios::cur);
+            }
+        } else if (file.ends_with("files.img")) {
+            std::ifstream in(file, std::ios::binary);
+            std::vector<char> head(1 << 20 | 512);
+            in.read(head.data(), std::streamsize(head.size()));
+            disk += in && std::string_view(head.data() + (1 << 20) + 82, 8) == "FAT32   " ? " fat-image" : " no-image";
+        }
+        if (a.find("if=ide") != std::string::npos && file.ends_with("base.qcow2"))
+            disk += " image-on-ide";
+    }
     std::cout << "Booting...\r\nlogin: " << std::flush;
     if (mode == "dies")
         return 0;
@@ -363,6 +389,28 @@ UTest delivered{"a program of this machine is delivered on the files disk and ru
     auto r = runner::run(o);
     expect(contains(r.output, "/mnt/dirun/prog arg")) << "the guest runs the copy, by the profile's [files] at";
     expect(contains(r.output, "disk: prog")) << "the program is on the read-only FAT disk the emulator was given";
+}};
+
+UTest delivered_tar{"with [files] form = \"tar\" the files disk is an archive of the delivered files", [] {
+    auto o = guest_options("password");
+    o.prof.files_form = "tar";
+    const auto program = temp_dir() / "prog";
+    std::ofstream(program) << "binary";
+    o.command = {program.generic_string(), "arg"};
+    auto r = runner::run(o);
+    expect(contains(r.output, "tar:prog")) << r.output;
+    expect(!contains(r.output, "not ustar")) << r.output;
+}};
+
+UTest delivered_ide{"with [machine] bus = \"ide\" both disks are on it, and the files are a FAT32 image", [] {
+    auto o = guest_options("password");
+    o.prof.vm.bus = "ide";
+    const auto program = temp_dir() / "prog";
+    std::ofstream(program) << "binary";
+    o.command = {program.generic_string(), "arg"};
+    auto r = runner::run(o);
+    expect(contains(r.output, "fat-image")) << r.output;
+    expect(contains(r.output, "image-on-ide")) << r.output;
 }};
 
 UTest relayed{"a test runner's events written in the guest are appended to its report", [] {

@@ -157,6 +157,69 @@ std::string expanded(const std::string& text, const std::map<std::string, std::s
     return *e;
 }
 
+// THE FILES AS A TAR ARCHIVE ON A DISK OF ITS OWN (`[files] form = "tar"', 0.7.0): for a guest that
+// reads no FAT volume, or reads one unreliably (measured: GNU/Hurd's fatfs does not answer on a
+// FAT32 volume). The archive is the disk, from its first sector: `tar xf <device>' is the mount
+// step. Plain ustar: directories and regular files, executable, under their relative names.
+void tar_field(std::array<char, 512>& h, std::size_t at, std::size_t width, std::uint64_t value) {
+    const auto text = std::format("{:0{}o}", value, width - 1);
+    std::copy(text.begin(), text.end(), h.begin() + static_cast<std::ptrdiff_t>(at));
+}
+void write_tar(const std::filesystem::path& root, const std::filesystem::path& image) {
+    std::ofstream out(image, std::ios::binary);
+    std::vector<std::filesystem::path> entries;
+    for (const auto& e : std::filesystem::recursive_directory_iterator(root))
+        entries.push_back(e.path());
+    std::ranges::sort(entries);
+    std::uint64_t written = 0;
+    for (const auto& path : entries) {
+        const bool is_dir = std::filesystem::is_directory(path);
+        auto name = os::fs::utf8(std::filesystem::relative(path, root));
+        std::ranges::replace(name, '\\', '/');
+        if (is_dir) name += '/';
+        std::string prefix;
+        if (name.size() > 100) {
+            const auto cut = name.rfind('/', 155);
+            if (cut == std::string::npos || name.size() - cut - 1 > 100 || cut > 155)
+                throw error("a delivered file's name is too long for the files archive: " + name, exit_unusable);
+            prefix = name.substr(0, cut);
+            name = name.substr(cut + 1);
+        }
+        const std::uint64_t size = is_dir ? 0 : std::filesystem::file_size(path);
+        std::array<char, 512> h{};
+        std::copy(name.begin(), name.end(), h.begin());
+        tar_field(h, 100, 8, 0755);
+        tar_field(h, 108, 8, 0);
+        tar_field(h, 116, 8, 0);
+        tar_field(h, 124, 12, size);
+        tar_field(h, 136, 12, 0);
+        std::fill(h.begin() + 148, h.begin() + 156, ' ');
+        h[156] = is_dir ? '5' : '0';
+        std::copy_n("ustar", 6, h.begin() + 257);
+        h[263] = '0'; h[264] = '0';
+        std::copy(prefix.begin(), prefix.end(), h.begin() + 345);
+        unsigned sum = 0;
+        for (const char c : h) sum += static_cast<unsigned char>(c);
+        const auto text = std::format("{:06o}", sum);
+        std::copy(text.begin(), text.end(), h.begin() + 148);
+        h[154] = 0; h[155] = ' ';
+        out.write(h.data(), 512);
+        written += 512;
+        if (!is_dir) {
+            std::ifstream in(path, std::ios::binary);
+            out << in.rdbuf();
+            const std::uint64_t pad = (512 - size % 512) % 512;
+            out.write(std::string(pad, '\0').data(), static_cast<std::streamsize>(pad));
+            written += size + pad;
+        }
+    }
+    // The end of the archive, and a disk of whole mebibytes: a device has a size its driver accepts.
+    const std::uint64_t whole = ((written + 1024) / (1u << 20) + 1) * (1u << 20);
+    out.write(std::string(whole - written, '\0').data(), static_cast<std::streamsize>(whole - written));
+    if (!out)
+        throw error("the files archive could not be written: " + str(image), exit_unusable);
+}
+
 // The files gathered in a directory that the emulator presents as a read-only FAT disk (QEMU's
 // `fat:' driver: no tool of the host's, the same on every host); mounting it is the profile's
 // [files] mount. The disk has one partition.
@@ -344,12 +407,28 @@ result run_guest(const options& o, const clock& c) {
     // NEVER WRITTEN: the emulator keeps the guest's writes in a temporary overlay of its own
     // (`snapshot=on'), which it discards when it ends, and reads the image's format itself unless
     // the profile states it. No tool of the host's makes an overlay.
-    std::string drive = "file=" + str(std::filesystem::absolute(os::fs::from_utf8(image))) + ",if=virtio,snapshot=on";
+    // THE BUS IS THE PROFILE'S (0.7.0): a system with no virtio driver --- one whose disks are
+    // behind a controller it emulates, IDE or AHCI by the machine type --- finds neither disk on
+    // virtio (measured: GNU/Hurd, `ext2fs: device:wd0: No such device or address').
+    std::string drive = "file=" + str(std::filesystem::absolute(os::fs::from_utf8(image))) + ",if=" + p.vm.bus + ",snapshot=on";
     if (!p.vm.format.empty())
         drive += ",format=" + p.vm.format;
     argv.insert(argv.end(), {"-drive", drive});
-    if (disk)
+    if (disk && p.files_form == "tar") {
+        const auto archive = dir.path() / "files.tar";
+        write_tar(os::fs::from_utf8(*disk), archive);
+        argv.insert(argv.end(), {"-drive", "file=" + str(archive) + ",if=" + p.vm.bus + ",format=raw,snapshot=on"});
+    } else if (disk && p.vm.bus == "virtio") {
         argv.insert(argv.end(), {"-drive", "file=fat:" + *disk + ",if=virtio,format=raw,readonly=on"});
+    } else if (disk) {
+        // An emulated IDE disk cannot be read-only (QEMU: `Block node is read-only'), and a
+        // directory presented as a FAT volume is. The files are written into a disk image of
+        // their own (dirun.fat) and the guest is given that, its writes kept in the overlay.
+        const auto files_image = dir.path() / "files.img";
+        if (auto w = fat::write(os::fs::from_utf8(*disk), files_image); !w)
+            throw error("the files' FAT image could not be written: " + w.error(), exit_unusable);
+        argv.insert(argv.end(), {"-drive", "file=" + str(files_image) + ",if=" + p.vm.bus + ",format=raw,snapshot=on"});
+    }
 
     // The emulator's temporary files --- the snapshot overlay --- are in the run's directory,
     // removed with it; a system's own temporary directory may not exist (measured: no /var/tmp).

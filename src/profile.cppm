@@ -48,6 +48,7 @@ struct machine {
     std::string image;             // the disk booted when --image is not given; a relative name is
                                    // the profile file's directory's (an image ships its profile)
     std::string format;            // the image's format; empty: the emulator reads it
+    std::string bus = "virtio";    // how the image and the files disk are attached: virtio or ide
 };
 
 struct command {
@@ -121,6 +122,7 @@ struct profile {
     command cmd;
     std::vector<std::string> mount;  // sent before the command when files are delivered
     std::string files_at;            // where the mount lines put the files disk in the guest
+    std::string files_form = "fat";  // what the files disk holds: a FAT volume, or a tar archive (0.7.0)
     std::optional<relay> events;
     std::optional<payload> boot_payload;
     std::optional<reach> reached;
@@ -232,7 +234,7 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
     p.origin = o;
     p.name = t["name"].value_or(std::string("unnamed"));
     if (auto m = t["machine"].as_table()) {
-        if (auto k = known(*m, o + " [machine]", {"arch", "type", "cpu", "memory", "smp", "args", "image", "format"}); !k)
+        if (auto k = known(*m, o + " [machine]", {"arch", "type", "cpu", "memory", "smp", "args", "image", "format", "bus"}); !k)
             return std::unexpected(k.error());
         p.vm.arch = (*m)["arch"].value_or(p.vm.arch);
         p.vm.type = (*m)["type"].value_or(std::string());
@@ -242,6 +244,9 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
         p.vm.args = strings((*m)["args"]);
         p.vm.image = (*m)["image"].value_or(std::string());
         p.vm.format = (*m)["format"].value_or(std::string());
+        p.vm.bus = (*m)["bus"].value_or(p.vm.bus);
+        if (p.vm.bus != "virtio" && p.vm.bus != "ide")
+            return std::unexpected(std::format("{}: [machine] bus is virtio or ide, not `{}'", o, p.vm.bus));
     }
     if (auto b = t["boot"].as_array())
         for (const auto& n : *b) {
@@ -283,10 +288,13 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
             return std::unexpected(o + ": [command] needs `line', `begin' and a valid `status' pattern");
     }
     if (auto f = t["files"].as_table()) {
-        if (auto k = known(*f, o + " [files]", {"mount", "at"}); !k)
+        if (auto k = known(*f, o + " [files]", {"mount", "at", "form"}); !k)
             return std::unexpected(k.error());
         p.mount = strings((*f)["mount"]);
         p.files_at = (*f)["at"].value_or(std::string());
+        p.files_form = (*f)["form"].value_or(p.files_form);
+        if (p.files_form != "fat" && p.files_form != "tar")
+            return std::unexpected(std::format("{}: [files] form is fat or tar, not `{}'", o, p.files_form));
     }
     if (auto r = t["relay"].as_table()) {
         if (auto k = known(*r, o + " [relay]", {"report", "read"}); !k)

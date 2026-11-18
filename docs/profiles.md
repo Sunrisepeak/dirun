@@ -19,6 +19,7 @@ memory = 1024                # MiB
 smp    = 1
 args   = []                  # further emulator words
 image  = "disk.qcow2"        # the disk when --image is not given; relative: beside this file
+bus    = "virtio"            # how the image and the files disk are attached: virtio, or ide (0.7.0)
 
 [[boot]]                     # in order
 expect  = "Autoboot in"      # a regular expression (ECMAScript) awaited on the console
@@ -45,6 +46,7 @@ status  = "@@STATUS=(\\d+)@@"
 [files]                      # the read-only FAT disk of the files (one partition)
 mount = ["mkdir -p /mnt/in", "mount -r -t msdosfs /dev/vtbd1s1 /mnt/in"]
 at    = "/mnt/in"            # where `mount` puts it: a delivered program runs from its copy there
+form  = "fat"                # what the disk holds: fat, or tar --- the archive is the disk (0.7.0)
 
 [relay]                      # the test protocol's events (docs/contract.md, "The test protocol")
 report = "/tmp/dirun-mtest.ndjson"   # the guest file the command writes them to
@@ -68,6 +70,17 @@ disk    = "directory"        # directory: {dir} itself; fat-image: a writable FA
 # emulator    = "bin/dosbox" # when --emulator is not given; relative: beside this file
 # beside      = ["CWSDPMI.EXE"]   # files beside this file, delivered beside the payload
 ```
+
+`[machine] bus` states the emulator's drive interface for the image and for the files disk (0.7.0).
+`virtio` is the default. `ide` is for a system that has no virtio driver: its disks are then behind
+the controller the machine type emulates (PIIX IDE on `pc`, AHCI on `q35`), and the profile's mount
+step names the device that system gives the second disk. An emulated IDE disk cannot be read-only,
+so on `ide` the files are a FAT32 disk image dirun writes (as `[payload] disk = "fat-image"`), whose
+changes are discarded with the run.
+
+`[files] form = "tar"` (0.7.0) is for a guest that reads no FAT volume, or not reliably: the disk is a
+ustar archive from its first sector, and the mount step unpacks the device
+(`"mkdir -p /tmp/in", "cd /tmp/in", "tar xf /dev/wd1"`). Every system with a `tar` reads it.
 
 `disk` states what the emulator is given (0.6.0). With `directory`, the emulator is given `{dir}`
 and presents it as it can: QEMU's `fat:{dir}` presents a directory as a FAT volume that is read-only

@@ -123,3 +123,27 @@ UTest disk{"a payload's disk is its directory or a FAT image, and an image is no
     expect(contains(read_back.error(), "not read back"));
     expect(!profile::parse("[payload]\ndisk = \"fat-image\"\noutput-file = \"OUT.TXT\"\n", "t.toml").has_value());
 }};
+
+UTest disk_bus{"the bus of the disks is the profile's: virtio unless it states ide", [] {
+    auto unstated = profile::parse("[machine]\narch = \"x86_64\"\n", "t.toml");
+    expect(fatal(unstated.has_value())) << (unstated ? "" : unstated.error());
+    expect(eq(unstated->vm.bus, std::string("virtio")));
+    auto ide = profile::parse("[machine]\nbus = \"ide\"\n", "t.toml");
+    expect(fatal(ide.has_value())) << (ide ? "" : ide.error());
+    expect(eq(ide->vm.bus, std::string("ide")));
+    auto other = profile::parse("[machine]\nbus = \"floppy\"\n", "t.toml");
+    expect(fatal(!other.has_value()));
+    expect(contains(other.error(), "virtio or ide"));
+}};
+
+UTest files_form{"the files disk is a FAT volume unless the profile states a tar archive", [] {
+    auto unstated = profile::parse("[files]\nmount = [\"true\"]\nat = \"/in\"\n", "t.toml");
+    expect(fatal(unstated.has_value())) << (unstated ? "" : unstated.error());
+    expect(eq(unstated->files_form, std::string("fat")));
+    auto tar = profile::parse("[files]\nform = \"tar\"\nmount = [\"tar xf /dev/wd1\"]\nat = \"/in\"\n", "t.toml");
+    expect(fatal(tar.has_value())) << (tar ? "" : tar.error());
+    expect(eq(tar->files_form, std::string("tar")));
+    auto other = profile::parse("[files]\nform = \"zip\"\n", "t.toml");
+    expect(fatal(!other.has_value()));
+    expect(contains(other.error(), "fat or tar"));
+}};
