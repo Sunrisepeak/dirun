@@ -47,6 +47,10 @@ status  = "@@STATUS=(\\d+)@@"
 mount = ["mkdir -p /mnt/in", "mount -r -t msdosfs /dev/vtbd1s1 /mnt/in"]
 at    = "/mnt/in"            # where `mount` puts it: a delivered program runs from its copy there
 form  = "fat"                # what the disk holds: fat, or tar --- the archive is the disk (0.7.0)
+# label  = "files-label.bin" # tar: the system's own label, written from the disk's first byte;
+#                            #   beside this file (0.8.0)
+# offset = 5870592           # tar: where the archive begins, in bytes, a multiple of 512 (0.8.0)
+# size   = 73479168          # tar: the disk's size in bytes; files that do not fit are refused (0.8.0)
 
 [relay]                      # the test protocol's events (docs/contract.md, "The test protocol")
 report = "/tmp/dirun-mtest.ndjson"   # the guest file the command writes them to
@@ -81,6 +85,17 @@ changes are discarded with the run.
 `[files] form = "tar"` (0.7.0) is for a guest that reads no FAT volume, or not reliably: the disk is a
 ustar archive from its first sector, and the mount step unpacks the device
 (`"mkdir -p /tmp/in", "cd /tmp/in", "tar xf /dev/wd1"`). Every system with a `tar` reads it.
+
+A system whose disk driver opens a disk only through the system's own label --- a partition table,
+then a label of its own, before any slice can be read --- is given that label first (0.8.0):
+`label` names a file of its bytes, shipped beside the profile as the image is; the archive begins at
+`offset`, the first byte of a slice the label states; and `size`, the disk's size, is the size the
+label states, so that the driver finds the disk it describes. Files that do not fit between `offset`
+and `size` are refused before the machine starts. The label is the image's fact: the system writes
+it, and the image's builder takes it from a disk the system has labelled. Measured: UNIX System
+V/386 Release 4.0, whose driver reads a master boot record, a pdinfo sector, a VTOC and an
+alternates table before a slice, and whose mount step is `tar xf /dev/rdsk/1s2`, a raw slice of the
+second disk. Without a label the archive is the disk from its first byte, as in 0.7.0.
 
 `disk` states what the emulator is given (0.6.0). With `directory`, the emulator is given `{dir}`
 and presents it as it can: QEMU's `fat:{dir}` presents a directory as a FAT volume that is read-only

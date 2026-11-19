@@ -147,3 +147,33 @@ UTest files_form{"the files disk is a FAT volume unless the profile states a tar
     expect(fatal(!other.has_value()));
     expect(contains(other.error(), "fat or tar"));
 }};
+
+UTest files_label{"a tar files disk may carry the system's own label: the label, where the archive begins, the disk's "
+                  "size", [] {
+    auto laid = profile::parse("[files]\nform = \"tar\"\nlabel = \"files-label.bin\"\noffset = 5870592\n"
+                               "size = 73479168\nmount = [\"tar xf /dev/rdsk/1s2\"]\nat = \"/tmp/dirun\"\n", "t.toml");
+    expect(fatal(laid.has_value())) << (laid ? "" : laid.error());
+    expect(eq(laid->files_label, std::string("files-label.bin")));
+    expect(eq(laid->files_offset, std::uint64_t{5870592}));
+    expect(eq(laid->files_size, std::uint64_t{73479168}));
+    auto plain = profile::parse("[files]\nform = \"tar\"\n", "t.toml");
+    expect(fatal(plain.has_value()));
+    expect(eq(plain->files_offset, std::uint64_t{0})) << "no label: the archive from the first byte, as in 0.7.0";
+    for (const auto& [text, says] : std::vector<std::pair<std::string, std::string>>{
+             {"[files]\nlabel = \"l.bin\"\noffset = 4096\n", "need form = \"tar\""},
+             {"[files]\nform = \"tar\"\nlabel = \"l.bin\"\n", "needs `offset'"},
+             {"[files]\nform = \"tar\"\noffset = 1000\n", "a multiple of 512"},
+             {"[files]\nform = \"tar\"\noffset = -512\n", "positive number of bytes"},
+             {"[files]\nform = \"tar\"\noffset = 8192\nsize = 4096\n", "not inside the disk's size"}}) {
+        auto bad = profile::parse(text, "t.toml");
+        expect(fatal(!bad.has_value())) << text;
+        expect(contains(bad.error(), says)) << bad.error();
+    }
+    // A label ships beside the profile, as the image does.
+    const auto dir = std::filesystem::temp_directory_path() / "dirun-profile-label";
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "dirun.toml") << "[files]\nform = \"tar\"\nlabel = \"files-label.bin\"\noffset = 4096\n";
+    auto loaded = profile::load(dir / "dirun.toml");
+    expect(fatal(loaded.has_value())) << (loaded ? "" : loaded.error());
+    expect(eq(std::filesystem::path(loaded->files_label), std::filesystem::absolute(dir) / "files-label.bin"));
+}};
