@@ -49,14 +49,34 @@ child guest{"fake-guest", [](std::vector<std::string> args) {
             continue;
         const auto file = a.substr(at + 5, a.find(',', at) - at - 5);
         if (file.ends_with("files.tar")) {
+            // The archive from its first ustar header; what precedes it is a label (0.8.0), whose
+            // first bytes, and the header's offset, are reported, with the disk's size.
             std::ifstream in(file, std::ios::binary);
             std::array<char, 512> h{};
-            while (in.read(h.data(), 512) && h[0] != 0) {
+            std::uint64_t at = 0;
+            bool header = false;
+            while (in.read(h.data(), 512)) {
+                if (std::string_view(h.data() + 257, 5) == "ustar") {
+                    header = true;
+                    break;
+                }
+                if (at == 0 && h[0] != 0)
+                    disk += " label:" + std::string(h.data(), std::find(h.data(), h.data() + 16, char{0}));
+                at += 512;
+            }
+            if (header && at != 0)
+                disk += " archive-at:" + std::to_string(at);
+            while (header && h[0] != 0) {
                 const std::string name(h.data(), std::find(h.data(), h.data() + 100, char{0}));
                 const auto size = std::stoull(std::string(h.data() + 124, 11), nullptr, 8);
                 disk += " tar:" + name + (std::string_view(h.data() + 257, 5) == "ustar" ? "" : "(not ustar)");
                 in.seekg(static_cast<std::streamoff>((size + 511) / 512 * 512), std::ios::cur);
+                if (!in.read(h.data(), 512))
+                    break;
             }
+            if (!header)
+                disk += " tar:(no ustar header)";
+            disk += " disk-bytes:" + std::to_string(std::filesystem::file_size(file));
         } else if (file.ends_with("files.img")) {
             std::ifstream in(file, std::ios::binary);
             std::vector<char> head(1 << 20 | 512);
@@ -400,6 +420,53 @@ UTest delivered_tar{"with [files] form = \"tar\" the files disk is an archive of
     auto r = runner::run(o);
     expect(contains(r.output, "tar:prog")) << r.output;
     expect(!contains(r.output, "not ustar")) << r.output;
+}};
+
+UTest delivered_tar_label{"a tar files disk behind the system's own label: the label first, the archive at the "
+                          "offset, the disk of the stated size", [] {
+    auto o = guest_options("password");
+    o.prof.files_form = "tar";
+    const auto label = temp_dir() / "files-label.bin";
+    std::ofstream(label, std::ios::binary) << "SYSTEMLABEL";
+    o.prof.files_label = label.generic_string();
+    o.prof.files_offset = 4096;
+    o.prof.files_size = 1u << 20;
+    const auto program = temp_dir() / "prog";
+    std::ofstream(program) << "binary";
+    o.command = {program.generic_string(), "arg"};
+    auto r = runner::run(o);
+    expect(contains(r.output, "label:SYSTEMLABEL")) << r.output;
+    expect(contains(r.output, "archive-at:4096")) << r.output;
+    expect(contains(r.output, "tar:prog")) << r.output;
+    expect(contains(r.output, "disk-bytes:1048576")) << "the disk is the label's size, not the archive's: " << r.output;
+    expect(eq(r.status, 0));
+}};
+
+UTest delivered_tar_too_large{"files that do not fit the files disk the label states are refused before the machine "
+                              "starts", [] {
+    auto o = guest_options("password");
+    o.prof.files_form = "tar";
+    o.prof.files_offset = 4096;
+    o.prof.files_size = 8192;
+    const auto program = temp_dir() / "prog";
+    std::ofstream(program) << std::string(8192, 'x');
+    o.command = {program.generic_string()};
+    try {
+        auto r = runner::run(o);
+        expect(false) << "the run started: " << r.output;
+    } catch (const runner::error& e) {
+        expect(eq(e.code(), runner::exit_unusable)) << e.what();
+        expect(contains(std::string(e.what()), "which holds 4096")) << e.what();
+    }
+    o.prof.files_size = 0;
+    o.prof.files_label = (temp_dir() / "no-such-label.bin").generic_string();
+    try {
+        auto r = runner::run(o);
+        expect(false) << "the run started without its label: " << r.output;
+    } catch (const runner::error& e) {
+        expect(eq(e.code(), runner::exit_unusable)) << e.what();
+        expect(contains(std::string(e.what()), "label could not be read")) << e.what();
+    }
 }};
 
 UTest delivered_ide{"with [machine] bus = \"ide\" both disks are on it, and the files are a FAT32 image", [] {

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0 -- 2026-11-19
+
+- **A tar files disk behind the system's own label.** `[files] label`, `offset` and `size` (with
+  `form = "tar"`): the disk begins with the label's bytes (a file beside the profile), the archive
+  begins at `offset`, and the disk has `size` bytes; files that do not fit are refused before the
+  machine starts, with the sizes named. For a system whose disk driver reads a partition table and
+  a label of its own before any slice (measured: UNIX System V/386 Release 4.0 reads the archive
+  from a raw slice of the second disk, `tar xf /dev/rdsk/1s2`, behind the label its own installer
+  wrote). Without them the disk is the archive from its first byte, as in 0.7.0.
+
 ## 0.7.0 -- 2026-11-18
 
 - **`[machine] bus`.** The image and the files disk are attached by the interface the profile

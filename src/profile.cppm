@@ -123,6 +123,13 @@ struct profile {
     std::vector<std::string> mount;  // sent before the command when files are delivered
     std::string files_at;            // where the mount lines put the files disk in the guest
     std::string files_form = "fat";  // what the files disk holds: a FAT volume, or a tar archive (0.7.0)
+    // A tar files disk that the guest's driver reads only behind the system's own label (0.8.0): the
+    // label's bytes from the disk's first byte (`label', a file beside the profile), the archive from
+    // `files_offset', the disk `files_size' bytes. 0: the archive from the first byte, the disk sized
+    // to it, as before.
+    std::string files_label;
+    std::uint64_t files_offset = 0;
+    std::uint64_t files_size = 0;
     std::optional<relay> events;
     std::optional<payload> boot_payload;
     std::optional<reach> reached;
@@ -288,13 +295,38 @@ std::expected<profile, std::string> parse(std::string_view text, std::string_vie
             return std::unexpected(o + ": [command] needs `line', `begin' and a valid `status' pattern");
     }
     if (auto f = t["files"].as_table()) {
-        if (auto k = known(*f, o + " [files]", {"mount", "at", "form"}); !k)
+        if (auto k = known(*f, o + " [files]", {"mount", "at", "form", "label", "offset", "size"}); !k)
             return std::unexpected(k.error());
         p.mount = strings((*f)["mount"]);
         p.files_at = (*f)["at"].value_or(std::string());
         p.files_form = (*f)["form"].value_or(p.files_form);
         if (p.files_form != "fat" && p.files_form != "tar")
             return std::unexpected(std::format("{}: [files] form is fat or tar, not `{}'", o, p.files_form));
+        // THE SYSTEM'S OWN LABEL BEFORE THE ARCHIVE (0.8.0). A system whose disk driver opens a disk
+        // only through its partition table and its own label (measured: UNIX System V/386 Release
+        // 4.0, whose driver reads a master boot record, a pdinfo sector and a VTOC before any slice)
+        // is given those bytes first, and reads the archive from a slice of its own:
+        // `tar xf /dev/rdsk/1s2'. The label is the image's fact and ships beside it; the offset
+        // and the size are where that label puts the slice.
+        p.files_label = (*f)["label"].value_or(std::string());
+        for (const auto& [key, to] : {std::pair<const char*, std::uint64_t*>{"offset", &p.files_offset},
+                                      std::pair<const char*, std::uint64_t*>{"size", &p.files_size}}) {
+            const auto& node = (*f)[key];
+            if (!node)
+                continue;
+            const auto n = node.value<std::int64_t>();
+            if (!n || *n <= 0 || *n % 512 != 0)
+                return std::unexpected(std::format("{}: [files] {} is a positive number of bytes, a multiple of 512", o, key));
+            *to = static_cast<std::uint64_t>(*n);
+        }
+        const bool laid_out = !p.files_label.empty() || p.files_offset != 0 || p.files_size != 0;
+        if (laid_out && p.files_form != "tar")
+            return std::unexpected(o + ": [files] label, offset and size lay out a tar files disk: they need form = \"tar\"");
+        if (!p.files_label.empty() && p.files_offset == 0)
+            return std::unexpected(o + ": [files] label needs `offset', where the archive begins after it");
+        if (p.files_size != 0 && p.files_offset >= p.files_size)
+            return std::unexpected(std::format("{}: [files] offset ({}) is not inside the disk's size ({})", o,
+                                               p.files_offset, p.files_size));
     }
     if (auto r = t["relay"].as_table()) {
         if (auto k = known(*r, o + " [relay]", {"report", "read"}); !k)
@@ -412,6 +444,7 @@ std::expected<profile, std::string> load(const std::filesystem::path& file) {
             name = (here / name).generic_string();
     };
     beside_profile(p->vm.image);
+    beside_profile(p->files_label);
     if (p->boot_payload) {
         beside_profile(p->boot_payload->emulator);
         for (auto& f : p->boot_payload->beside)

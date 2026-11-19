@@ -161,17 +161,40 @@ std::string expanded(const std::string& text, const std::map<std::string, std::s
 // reads no FAT volume, or reads one unreliably (measured: GNU/Hurd's fatfs does not answer on a
 // FAT32 volume). The archive is the disk, from its first sector: `tar xf <device>' is the mount
 // step. Plain ustar: directories and regular files, executable, under their relative names.
+// BEHIND THE SYSTEM'S OWN LABEL (0.8.0): with `[files] label', the disk begins with the label's
+// bytes and the archive begins at `[files] offset'; with `[files] size' the disk has that size, and
+// files that do not fit it are refused before the machine starts.
 void tar_field(std::array<char, 512>& h, std::size_t at, std::size_t width, std::uint64_t value) {
     const auto text = std::format("{:0{}o}", value, width - 1);
     std::copy(text.begin(), text.end(), h.begin() + static_cast<std::ptrdiff_t>(at));
 }
-void write_tar(const std::filesystem::path& root, const std::filesystem::path& image) {
+void zeros(std::ofstream& out, std::uint64_t n) {
+    static const std::string block(1u << 16, '\0');
+    for (; n >= block.size(); n -= block.size())
+        out.write(block.data(), static_cast<std::streamsize>(block.size()));
+    out.write(block.data(), static_cast<std::streamsize>(n));
+}
+void write_tar(const std::filesystem::path& root, const std::filesystem::path& image, const profile::profile& p) {
     std::ofstream out(image, std::ios::binary);
+    std::uint64_t written = 0;  // the disk's bytes so far: the label and its gap, then the archive
+    if (!p.files_label.empty()) {
+        std::ifstream in(os::fs::from_utf8(p.files_label), std::ios::binary);
+        if (!in)
+            throw error("the files disk's label could not be read: " + p.files_label, exit_unusable,
+                        "install the image's package again: the label ships beside its profile");
+        const std::string label{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+        if (label.size() > p.files_offset)
+            throw error(std::format("the files disk's label ({} bytes) is longer than [files] offset ({})",
+                                    label.size(), p.files_offset), exit_unusable);
+        out.write(label.data(), static_cast<std::streamsize>(label.size()));
+        written = label.size();
+    }
+    zeros(out, p.files_offset - written);
+    written = p.files_offset;
     std::vector<std::filesystem::path> entries;
     for (const auto& e : std::filesystem::recursive_directory_iterator(root))
         entries.push_back(e.path());
     std::ranges::sort(entries);
-    std::uint64_t written = 0;
     for (const auto& path : entries) {
         const bool is_dir = std::filesystem::is_directory(path);
         auto name = os::fs::utf8(std::filesystem::relative(path, root));
@@ -214,8 +237,17 @@ void write_tar(const std::filesystem::path& root, const std::filesystem::path& i
         }
     }
     // The end of the archive, and a disk of whole mebibytes: a device has a size its driver accepts.
-    const std::uint64_t whole = ((written + 1024) / (1u << 20) + 1) * (1u << 20);
-    out.write(std::string(whole - written, '\0').data(), static_cast<std::streamsize>(whole - written));
+    // A stated size is the label's: the disk has it, and an archive that does not fit is refused.
+    std::uint64_t whole = ((written + 1024) / (1u << 20) + 1) * (1u << 20);
+    if (p.files_size != 0) {
+        if (written + 1024 > p.files_size)
+            throw error(std::format("the delivered files take {} bytes on the files disk, which holds {} from its "
+                                    "[files] offset ({}) to its size ({})", written + 1024 - p.files_offset,
+                                    p.files_size - p.files_offset, p.files_offset, p.files_size),
+                        exit_unusable, "deliver fewer or smaller files");
+        whole = p.files_size;
+    }
+    zeros(out, whole - written);
     if (!out)
         throw error("the files archive could not be written: " + str(image), exit_unusable);
 }
@@ -416,7 +448,7 @@ result run_guest(const options& o, const clock& c) {
     argv.insert(argv.end(), {"-drive", drive});
     if (disk && p.files_form == "tar") {
         const auto archive = dir.path() / "files.tar";
-        write_tar(os::fs::from_utf8(*disk), archive);
+        write_tar(os::fs::from_utf8(*disk), archive, p);
         argv.insert(argv.end(), {"-drive", "file=" + str(archive) + ",if=" + p.vm.bus + ",format=raw,snapshot=on"});
     } else if (disk && p.vm.bus == "virtio") {
         argv.insert(argv.end(), {"-drive", "file=fat:" + *disk + ",if=virtio,format=raw,readonly=on"});
